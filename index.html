@@ -108,11 +108,15 @@
   .risk .rk-v{flex:1}
   .risk .rk b{color:#ff6b5e}
   .risk .rk .cap{color:#e8a87c;font-weight:700}
+  .livebadge{display:inline-block;font-size:11px;font-weight:700;vertical-align:middle;padding:2px 9px;border-radius:11px;margin-left:8px;border:1px solid var(--sub);color:var(--sub);letter-spacing:.5px}
+  .livebadge.on{color:#4ade80;border-color:#4ade80;animation:livepulse 1.4s ease-in-out infinite}
+  .livebadge.off{color:#e8a87c;border-color:#e8a87c;animation:none}
+  @keyframes livepulse{0%,100%{opacity:1}50%{opacity:.4}}
 </style>
 </head>
 <body>
   <div class="top">
-    <h1>📊 五维共振</h1>
+    <h1>📊 五维共振 <span class="livebadge" id="liveBadge" style="display:none"></span></h1>
     <div style="text-align:right">
       <div class="upd" id="upd">加载中…</div>
       <button class="btn" id="rf" style="margin-top:4px">刷新</button>
@@ -913,11 +917,12 @@
   }
 
   /* ---------- 五维判定 ---------- */
-  function analyzeDirect() {
-    var t0 = Date.now();
-    var notes = [];
-    return fetchKline('sh000001').then(function (rows) {
-      rows = rows.slice(-130);
+  var _ctx = null;   // 快循环上下文缓存：{ rows0, br, em, bg }（analyzeDirect 成功后写入）
+
+  /* ---------- 判定核心 judgeCore：基础日K + 实时报价 + 广度 + 封板池 → 五维判定 ----------
+     纯本地计算、无网络请求；全量 analyzeDirect（60秒档/首载）与 1 秒快循环 judgeFast 共用。 */
+  function judgeCore(rows0, rt, br, em, notes, t0, bg) {
+    var rows = rows0.slice(-130);
       var close = rows.map(function (r) { return r.close; });
       var high = rows.map(function (r) { return r.high; });
       var low = rows.map(function (r) { return r.low; });
@@ -935,31 +940,7 @@
       var vma100 = amount.slice(-100).reduce(function (a, b) { return a + b; }, 0) / 100;
       var amaRatio = vma100 ? vma5 / vma100 : 1;
 
-      var rtP = fetchRealtime(['sh000001', 'sz399001', 'sz399006', 'sz399106', 'sh000680', 'sz399317'])
-        .catch(function (e) { notes.push('实时报价失败:' + e.message); return {}; });
-      var brP = fetchBreadth()
-        .catch(function (e) { notes.push('广度获取失败:' + e.message); return null; });
-      var emP = fetchLimitPools()
-        .catch(function (e) { notes.push('封板池(东财)获取失败，用规则兜底:' + e.message); return null; });
-      // 趋势股（中军）候选：后台异步加载，不阻塞主判定（12只个股K线精筛较慢）
       var shGain20 = close.length > 21 ? (close[close.length - 1] / close[close.length - 21] - 1) * 100 : 0;
-      var trendP = brP.then(function (br) {
-        return screenTrendStocks(br && br.rows, shGain20);
-      }).catch(function () { return { count: 0, list: [], note: '趋势股筛选失败' }; });
-      // 震荡标的候选：后台异步加载（震荡行情时展示箱底区个股）
-      var rangeP = brP.then(function (br) {
-        return screenRangeStocks(br && br.rows);
-      }).catch(function () { return { count: 0, list: [], note: '震荡标的筛选失败' }; });
-      // 概念主线：后台异步（依赖涨停池，拉概念列表+成分股，约10–15个请求）
-      var conceptP = emP.then(function (em) {
-        return fetchConceptMainLine(em ? em.ztPool : []);
-      }).catch(function (e) { notes.push('概念主线获取失败:' + e.message); return null; });
-      // 概念独立走强监测：后台异步（5概念×5只K线，约30请求）
-      var conceptStrengthP = fetchConceptStrength()
-        .catch(function (e) { notes.push('概念强度监测失败:' + e.message); return null; });
-
-      return Promise.all([rtP, brP, emP]).then(function (res) {
-        var rt = res[0], br = res[1], em = res[2];
         // 把今日实时行情拼入日K：修复盘中"日K滞后一天"（指数已涨但指标仍按昨日收盘算）
         var r0 = rt.sh000001;
         if (r0 && r0.cur) {
@@ -1147,15 +1128,63 @@
           limit_up: limitUp, limit_down: limitDown, limit_src: limitSrc,
           main_line: mainLine, premarket: breadthPremarket, sentiment: sentiment,
           box: computeBox(high, low, close),
-          trend: null, trendPromise: trendP, rangePromise: rangeP, buZhang: buZhang,
-          conceptPromise: conceptP, conceptStrengthPromise: conceptStrengthP,
+          trend: null, trendPromise: bg.trendP, rangePromise: bg.rangeP, buZhang: buZhang,
+          conceptPromise: bg.conceptP, conceptStrengthPromise: bg.conceptStrengthP,
           adx: adx, adx_slope: adxSlope, pdi: pdi, mdi: mdi,
           ema: { e5: e5[e5.length - 1], e10: e10[e10.length - 1], e20: e20[e20.length - 1], e60: e60[e60.length - 1], s5: s5, s10: s10, s20: s20, s60: s60 },
           bb: bb, ama_ratio: amaRatio,
           dims: dims, triggers: watch, watch: watch, notes: notes
         };
+  }
+
+  /* ---------- 全量分析（60秒档/首载）：拉日K+实时+广度+封板池，并缓存快循环上下文 ---------- */
+  function analyzeDirect() {
+    var t0 = Date.now();
+    var notes = [];
+    return fetchKline('sh000001').then(function (rows0) {
+      rows0 = rows0.slice(-130);
+      var cB = rows0.map(function (r) { return r.close; });
+      var shGain20 = cB.length > 21 ? (cB[cB.length - 1] / cB[cB.length - 21] - 1) * 100 : 0;
+      var rtP = fetchRealtime(['sh000001', 'sz399001', 'sz399006', 'sz399106', 'sh000680', 'sz399317'])
+        .catch(function (e) { notes.push('实时报价失败:' + e.message); return {}; });
+      var brP = fetchBreadth()
+        .catch(function (e) { notes.push('广度获取失败:' + e.message); return null; });
+      var emP = fetchLimitPools()
+        .catch(function (e) { notes.push('封板池(东财)获取失败，用规则兜底:' + e.message); return null; });
+      // 趋势股（中军）候选：后台异步加载，不阻塞主判定（12只个股K线精筛较慢）
+      var trendP = brP.then(function (br) {
+        return screenTrendStocks(br && br.rows, shGain20);
+      }).catch(function () { return { count: 0, list: [], note: '趋势股筛选失败' }; });
+      // 震荡标的候选：后台异步加载（震荡行情时展示箱底区个股）
+      var rangeP = brP.then(function (br) {
+        return screenRangeStocks(br && br.rows);
+      }).catch(function () { return { count: 0, list: [], note: '震荡标的筛选失败' }; });
+      // 概念主线：后台异步（依赖涨停池，拉概念列表+成分股，约10–15个请求）
+      var conceptP = emP.then(function (em) {
+        return fetchConceptMainLine(em ? em.ztPool : []);
+      }).catch(function (e) { notes.push('概念主线获取失败:' + e.message); return null; });
+      // 概念独立走强监测：后台异步（5概念×5只K线，约30请求）
+      var conceptStrengthP = fetchConceptStrength()
+        .catch(function (e) { notes.push('概念强度监测失败:' + e.message); return null; });
+
+      return Promise.all([rtP, brP, emP]).then(function (res) {
+        _ctx = { rows0: rows0, br: res[1], em: res[2],
+                 bg: { trendP: trendP, rangeP: rangeP, conceptP: conceptP, conceptStrengthP: conceptStrengthP } };
+        return judgeCore(rows0, res[0], res[1], res[2], notes, t0, _ctx.bg);
       });
     });
+  }
+
+  /* ---------- 快循环（1秒档）：复用缓存上下文，仅刷新实时报价并重算判定（纯本地，毫秒级） ---------- */
+  function judgeFast(rt) {
+    if (!_ctx) return null;
+    return judgeCore(_ctx.rows0, rt || {}, _ctx.br, _ctx.em, [], Date.now(), _ctx.bg);
+  }
+  /* ---------- 中循环（10秒档）：把新拉到的广度/封板池写入缓存上下文 ---------- */
+  function updateContext(br, em) {
+    if (!_ctx) return;
+    if (br) _ctx.br = br;
+    if (em) _ctx.em = em;
   }
 
   var API = {
@@ -1167,6 +1196,7 @@
     screenRangeStocks: screenRangeStocks, identifyBuZhang: identifyBuZhang,
     fetchConceptMainLine: fetchConceptMainLine, fetchConceptList: fetchConceptList,
     fetchConceptStrength: fetchConceptStrength,
+    judgeFast: judgeFast, updateContext: updateContext,
     setProgress: function (fn) { _onProgress = fn; }
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
@@ -1709,6 +1739,7 @@ async function load(){
     clearTimeout(wd);
     progressOn=false;  // 渲染完成后，后台趋势精筛不再覆盖状态栏
     render(d);
+    if(d.mode==='direct') startLive(); else stopLive();   // 直连模式自动进入三档实时循环
     // 趋势股精筛在后台异步完成，回填卡片（忽略过期轮次）
     if(d.trendPromise&&d.trendPromise.then){
       d.trendPromise.then(t=>{ if(my===loadSeq){ renderTrend(t); updateMid(t, d.regime); } })
@@ -1736,6 +1767,119 @@ async function load(){
 document.getElementById('rf').onclick=function(){ load(); };
 load();
 setInterval(load,60000);
+
+/* ============ 三档实时循环（live 模式自动启用：?live=1 或快照不可用走直连时） ============
+   A 档 1秒：仅重拉指数实时价 → judgeFast 纯本地重算五维判定 → 局部重绘（不重扫全市场）
+   B 档 10秒：重扫涨跌家数 + 封板池 → 写回缓存上下文
+   C 档 60秒：完整 load()（上方原有定时器，含日K结构/趋势股/概念卡全量刷新）
+   非交易时段 A/B 自动休眠，徽标显示当前市场阶段。 */
+const LIVE_CODES=['sh000001','sz399001','sz399006','sz399106','sh000680','sz399317'];
+function marketPhase(){
+  const d=new Date(),day=d.getDay(),hm=d.getHours()*100+d.getMinutes();
+  if(day===0||day===6) return '周末休市';
+  if(hm>=915&&hm<930) return '集合竞价';
+  if(hm>=930&&hm<=1130) return '交易中';
+  if(hm>1130&&hm<1300) return '午间休市';
+  if(hm>=1300&&hm<=1500) return '交易中';
+  if(hm>1500&&hm<=1530) return '已收盘';
+  return '非交易时段';
+}
+const isTradingNow=()=>{const p=marketPhase();return p==='交易中'||p==='集合竞价';};
+
+let liveActive=false,timerA=null,timerB=null,busyA=false,busyB=false,liveTicks=0;
+function setLiveBadge(state){
+  const el=document.getElementById('liveBadge'); if(!el) return;
+  el.style.display='';
+  if(state==='live'){ el.className='livebadge on'; el.textContent='● LIVE 1s'; }
+  else if(state==='wait'){ el.className='livebadge off'; el.textContent='● '+marketPhase(); }
+  else { el.className='livebadge'; el.textContent='快照'; }
+}
+/* 局部重绘：只更新盘中会变的区域（指数条/判定/五维/触发器/建议），不重置趋势/概念等异步卡 */
+function renderLive(d){
+  try{
+    const order=[['sh000001','上证'],['sz399001','深证'],['sz399006','创业板'],['sh000680','科创综指'],['sz399317','全A指数']];
+    let h='';
+    for(const [k,nm] of order){
+      const t=d.ticks&&d.ticks[k]; if(!t) continue;
+      const col=t.chg>=0?'var(--up)':'var(--down)';
+      const sign=t.chg>=0?'+':'';
+      h+=`<div class="tick"><div class="nm">${nm}</div><div class="px" style="color:${col}">${fmt(t.cur,0)}</div><div class="ch" style="color:${col}">${sign}${fmt(t.chg,2)}%</div></div>`;
+    }
+    if(h) document.getElementById('ticks').innerHTML=h;
+    const rc=d.regime==='单边上涨'?'var(--up)':d.regime==='单边下跌'?'var(--down)':'var(--side)';
+    document.getElementById('rg').style.color=rc;
+    document.getElementById('rg').textContent=d.regime;
+    document.getElementById('cf').textContent='共振置信度：'+d.conf+'（'+d.votes.up+'涨 / '+d.votes.down+'跌 / '+d.votes.side+'震；高置信=4维+看多且广度确认，中等=3维看多含噪音）';
+    document.getElementById('pos').textContent=d.position;
+    let dh='';
+    for(const x of d.dims){
+      dh+=`<div class="dim ${x.vote}"><div class="h"><span class="nm">${x.name}</span><span class="vb ${x.vote}">${VMAP[x.vote]}</span></div><div class="dt">${x.detail}</div></div>`;
+    }
+    document.getElementById('dims').innerHTML=dh;
+    renderAlert(d); renderPlaybook(d); renderBreakout(d); renderBox(d.box);
+    document.getElementById('adv-t').textContent=d.regime+' · 建议仓位 '+d.position;
+    const advLines=String(d.advice||'').split(/[；;]/).map(s=>s.replace(/[。.]$/,'').trim()).filter(Boolean);
+    document.getElementById('adv-b').innerHTML=advLines.map(s=>'<div class="al">'+s+'。</div>').join('');
+    const wd=d.watch||d.triggers||[];
+    const upOk=wd.filter(w=>w.bias==='up'&&w.ok).length;
+    const downOk=wd.filter(w=>w.bias==='down'&&w.ok).length;
+    const sideOk=wd.filter(w=>w.bias==='side'&&w.ok).length;
+    let th=''; let alr='';
+    if(d.regime==='单边下跌'&&upOk>=2) alr='⚠️ 右侧止跌信号共振，关注转震荡/上涨';
+    else if(d.regime==='单边上涨'&&downOk>=2) alr='⚠️ 顶部信号共振，警惕转震荡/下跌';
+    else if(d.regime==='震荡'&&(upOk>=2||downOk>=2)) alr='⚠️ 突破信号触发，方向正在选择';
+    if(alr) th+=`<div class="trig" style="border-color:var(--side)"><span style="font-weight:700;color:var(--side)">${alr}</span></div>`;
+    const biasTxt={up:'看多↑',down:'看空↓',side:'方向'};
+    for(const t of wd){
+      const ok=t.ok; const cls=ok?'y':'n'; const txt=ok?'✓ 已触发':'— 未触发';
+      th+=`<div class="trig"><span>${t.name}<span style="color:var(--sub);font-size:11px"> · ${biasTxt[t.bias]||''}</span></span><span class="ok ${cls}">${txt}</span></div>`;
+    }
+    document.getElementById('trigs').innerHTML=th;
+    setStatus('LIVE · '+d.updated+' · 第'+liveTicks+'次刷新');
+  }catch(e){}
+}
+async function tickA(){
+  if(!liveActive||busyA||loading) return;
+  if(!isTradingNow()){ setLiveBadge('wait'); return; }
+  busyA=true;
+  try{
+    const rt=await window.AshareEngine.fetchRealtime(LIVE_CODES);
+    const a=window.AshareEngine.judgeFast(rt);
+    if(a&&a.ticks&&(a.ticks.sh000001&&a.ticks.sh000001.cur)){
+      liveTicks++; renderLive(a); setLiveBadge('live');
+    }
+  }catch(e){}
+  busyA=false;
+}
+async function tickB(){
+  if(!liveActive||busyB||loading) return;
+  if(!isTradingNow()) return;
+  busyB=true;
+  try{
+    const br=await window.AshareEngine.fetchBreadth().catch(()=>null);
+    const em=await window.AshareEngine.fetchLimitPools().catch(()=>null);
+    window.AshareEngine.updateContext(br,em);
+    const rt=await window.AshareEngine.fetchRealtime(LIVE_CODES);
+    const a=window.AshareEngine.judgeFast(rt);
+    if(a&&a.ticks&&a.ticks.sh000001&&a.ticks.sh000001.cur){
+      liveTicks++; renderLive(a);
+    }
+  }catch(e){}
+  busyB=false;
+}
+function startLive(){
+  if(liveActive) return;
+  liveActive=true;
+  if(!timerA) timerA=setInterval(tickA,1000);
+  if(!timerB) timerB=setInterval(tickB,10000);
+  setLiveBadge(isTradingNow()?'live':'wait');
+}
+function stopLive(){
+  liveActive=false;
+  if(timerA){clearInterval(timerA);timerA=null;}
+  if(timerB){clearInterval(timerB);timerB=null;}
+  setLiveBadge('snap');
+}
 </script>
 </body>
 </html>

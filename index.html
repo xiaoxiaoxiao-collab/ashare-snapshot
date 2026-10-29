@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <meta name="theme-color" content="#0d1117">
-<title>A股五维共振 · 行情判定</title>
+<title>五维共振 · 行情判定</title>
 <style>
   :root{
     --bg:#0d1117; --card:#161b22; --line:#222b36; --txt:#e6edf3; --sub:#8b97a6;
@@ -68,6 +68,11 @@
   .alertbar .t2{color:#d9a3a3;font-size:12px;margin-top:3px}
   .alertbar.warn{background:linear-gradient(135deg,#2f2a16,#3a3318);border-color:#8a7434}
   .alertbar.warn .t1{color:var(--side)}
+  .databad{background:linear-gradient(135deg,#3a0d0d,#5a1414);border:1px solid #c0392b;border-radius:10px;padding:11px 13px;margin-bottom:10px;line-height:1.55;box-shadow:0 0 0 1px rgba(192,57,43,.25)}
+  .databad .t1{font-weight:800;color:#ff6b6b;font-size:14px}
+  .databad .t2{color:#e8b4b4;font-size:12px;margin-top:4px}
+  .databad.ok{background:linear-gradient(135deg,#0d3a1c,#14502a);border-color:#27ae60;box-shadow:0 0 0 1px rgba(39,174,96,.25)}
+  .databad.ok .t1{color:#7bed9f}
   .pb .v{flex:1 1 0%;min-width:0;font-size:13px;text-align:left;white-space:normal;overflow-wrap:anywhere;word-break:break-word}
   .err{color:var(--up);font-size:12px;margin-top:8px}
   .foot{font-size:11px;color:#5b6675;margin-top:16px;text-align:center;line-height:1.6}
@@ -107,12 +112,14 @@
 </head>
 <body>
   <div class="top">
-    <h1>📊 A股五维共振</h1>
+    <h1>📊 五维共振</h1>
     <div style="text-align:right">
       <div class="upd" id="upd">加载中…</div>
       <button class="btn" id="rf" style="margin-top:4px">刷新</button>
     </div>
   </div>
+
+  <div id="dataAlarm"></div>
 
   <div class="ticks" id="ticks"></div>
 
@@ -186,7 +193,7 @@
   <div class="foot" id="foot"></div>
 
 <script>
-/* A股五维共振 · 浏览器端直连引擎 v2
+/* 五维共振 · 浏览器端直连引擎 v2
  * 双通道取数：fetch(CORS) 失败自动降级 <script> 标签直载（绕过代理/CORS限制）
  * 数据源：
  *  - 指数日K:   proxy.finance.qq.com  newfqkline  (支持 _var 变量模式)
@@ -1288,8 +1295,22 @@ function renderAlert(d){
   const leadTxt=ml.lead?`总龙 ${ml.lead.name}（${ml.lead.lbc}连板） · `:'';
   if(s.zt>=5 && depthOk){
     el.innerHTML=`<div class="alertbar"><div class="t1">🔥 真主线成立：${s.sector}（${s.zt}家涨停 · 断层${ml.depth.toFixed(1)}x）</div><div class="t2">${leadTxt}涨停梯队断层明显，可重点跟踪该方向的龙头/中军</div></div>`;
-  }else if(s.zt>=3 && depthOk){
-    el.innerHTML=`<div class="alertbar warn"><div class="t1">⚠️ 主线雏形：${s.sector}（${s.zt}家涨停 · 断层${ml.depth.toFixed(1)}x）</div><div class="t2">${leadTxt}涨停梯队有断层，但家数未达5家，观察能否发酵成真主线</div></div>`;
+    }else if(s.zt>=3 && depthOk){
+      el.innerHTML=`<div class="alertbar warn"><div class="t1">⚠️ 主线雏形：${s.sector}（${s.zt}家涨停 · 断层${ml.depth.toFixed(1)}x）</div><div class="t2">${leadTxt}涨停梯队有断层，但家数未达5家，观察能否发酵成真主线</div></div>`;
+    }
+  }
+
+// 数据健康度报警：快照 data_ok=false 时顶部红条警示，防止静默降级快照被误用
+function renderDataAlarm(d){
+  const el=document.getElementById('dataAlarm');
+  if(!el) return;
+  if(d.data_ok===false){
+    const warns=(d.data_warn&&d.data_warn.length)?d.data_warn.join('；'):'数据自检未通过';
+    el.innerHTML=`<div class="databad"><div class="t1">⛔ 数据校验失败：本快照为静默降级产物，不可用于交易决策</div><div class="t2">原因：${warns}</div></div>`;
+  }else if(d.data_ok===true){
+    el.innerHTML=`<div class="databad ok"><div class="t1">✅ 数据校验通过：广度/指数K线/交易日均已正常获取</div></div>`;
+  }else{
+    el.innerHTML='';
   }
 }
 
@@ -1522,6 +1543,7 @@ function renderRisk(d){
 }
 
 function render(d){
+  renderDataAlarm(d);
   setStatus('更新 '+d.updated+' · '+d.cost_ms+'ms');
   const order=[['sh000001','上证'],['sz399001','深证'],['sz399006','创业板'],['sh000680','科创综指'],['sz399317','全A指数']];
   let h='';
@@ -1612,9 +1634,9 @@ let loading=false, loadSeq=0;
 
 /* ============ 云端快照（收盘后由定时任务生成，免服务器） ============
    快照可由 GitHub Actions 或家里电脑每日收盘后算出，推到任意静态托管。
-   把 SNAPSHOT_URL 改成你的托管地址即可常驻；未修改占位符时自动回退实时。
-   ?live=1 强制实时；?snap=<url> 临时读取指定快照（演示/外部覆盖用）。 */
-const SNAPSHOT_URL='https://YOUR_USER.github.io/ashare-snapshot/snapshot.json';
+   快照由家里电脑定时任务算出，推到本托管地址（已写死，打开链接即快照模式）。
+   ?live=1 强制实时；?snap=<url> 临时覆盖读取指定快照（演示/外部用）。 */
+const SNAPSHOT_URL='https://xiaoxiaoxiao-collab.github.io/ashare-snapshot/snapshot.json';
 const _sp=new URLSearchParams(location.search);
 const _snapOverride=_sp.get('snap');
 const USE_SNAPSHOT=_snapOverride ? true : !/YOUR_USER/.test(SNAPSHOT_URL);
@@ -1649,6 +1671,8 @@ async function buildAnalysisFromSnapshot(snap){
   a.updated='云端 '+snap.meta.generated_at;
   a.cost_ms=snap.meta.cost_ms||0;
   a.mode='snapshot';
+  a.data_ok = snap.meta.data_ok;
+  a.data_warn = snap.meta.data_warn || [];
   a.trend=a.trend||{count:0,list:[]};
   a.range=a.range||{count:0,list:[]};
   a.concept=a.concept||[];

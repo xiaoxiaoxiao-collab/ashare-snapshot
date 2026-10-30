@@ -2616,7 +2616,12 @@ async function load(){
 document.getElementById('rf').onclick=function(){ load(); };
 document.getElementById('modeBtn').onclick=function(){
   const u=new URLSearchParams(location.search);
-  if(/live=1/.test(location.search)){ u.delete('live'); } else { u.set('live','1'); }
+  // 当前解析出的模式：显式 live=1→实时；显式 snap=1→快照；auto 则按交易时段推导
+  const cur = /live=1/.test(location.search) ? 'live'
+            : /snap=1/.test(location.search) ? 'snap'
+            : (isTradingNow() ? 'live' : 'snap');
+  if(cur === 'live'){ u.delete('live'); u.set('snap','1'); }   // 实时→强制快照（交易时段也能切，而非退回auto实时）
+  else { u.delete('snap'); u.set('live','1'); }                // 快照→强制实时
   location.search = u.toString();
 };
 load();
@@ -2638,7 +2643,8 @@ function marketPhase(){
   if(hm>1500&&hm<=1530) return '已收盘';
   return '非交易时段';
 }
-const isTradingNow=()=>{const p=marketPhase();return p==='交易中'||p==='集合竞价';};
+// 用函数声明（有提升）：初始化阶段(load/setDataMode)会先于本行执行时调用，const 箭头函数会触发 TDZ 报错
+function isTradingNow(){return marketPhase()==='交易中'||marketPhase()==='集合竞价';}
 
 let liveActive=false,timerA=null,timerB=null,busyA=false,busyB=false,liveTicks=0,liveFallback=false,rtFailCount=0;
 function setLiveBadge(state){

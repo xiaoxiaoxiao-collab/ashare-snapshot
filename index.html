@@ -218,6 +218,9 @@
 
   /* 纪律常驻横幅 */
   .disc-banner{margin:6px 0 0;padding:9px 12px;border-radius:8px;font-weight:700;font-size:13px;line-height:1.5;box-shadow:0 2px 8px rgba(0,0,0,.3)}
+  .datamode{margin:6px 0 0;padding:6px 12px;border-radius:8px;font-size:11.5px;font-weight:600;line-height:1.6}
+  .datamode.live{background:rgba(74,222,128,.14);border:1px solid var(--up);color:#86efac}
+  .datamode.snap{background:rgba(251,191,36,.14);border:1px solid var(--side);color:#fde047}
   .disc-banner.down{background:rgba(248,113,113,.18);border:1px solid var(--down);color:#fca5a5}
   .disc-banner.side{background:rgba(250,204,21,.14);border:1px solid var(--side);color:#fde047}
   .disc-banner.up{background:rgba(74,222,128,.14);border:1px solid var(--up);color:#86efac}
@@ -274,10 +277,14 @@
       <h1>📊 五维共振 <span class="livebadge" id="liveBadge" style="display:none"></span></h1>
       <div style="text-align:right">
         <div class="upd" id="upd">加载中…</div>
-        <button class="btn" id="rf" style="margin-top:4px">刷新</button>
+        <div style="margin-top:4px">
+          <button class="btn" id="modeBtn">切实时</button>
+          <button class="btn" id="rf">刷新</button>
+        </div>
       </div>
     </div>
 
+    <div class="datamode" id="dataMode"></div>
     <div class="disc-banner" id="discBanner"></div>
   </div>
 
@@ -819,8 +826,12 @@
     var ampMax = (opts.ampMax != null) ? opts.ampMax : 20;
     n = Math.min(n, close.length);
     var h = high.slice(-n), l = low.slice(-n);
-    var boxHigh = Math.max.apply(null, h);
-    var boxLow = Math.min.apply(null, l);
+    // 稳健箱体：剔除单根最极端的涨停/利空跌停K线，避免一字板把箱顶拉虚高(止盈够不到)或把箱底拉虚低(止损被打掉)
+    var maxHi = Math.max.apply(null, h), minLo = Math.min.apply(null, l);
+    var hi2 = h.slice(), lo2 = l.slice();
+    hi2.splice(h.indexOf(maxHi), 1); lo2.splice(l.indexOf(minLo), 1);
+    var boxHigh = hi2.length ? Math.max.apply(null, hi2) : maxHi;
+    var boxLow = lo2.length ? Math.min.apply(null, lo2) : minLo;
     var cur = close[close.length - 1];
     var amp = boxLow > 0 ? (boxHigh / boxLow - 1) * 100 : 0;
     var pos = (boxHigh - boxLow) > 0 ? (cur - boxLow) / (boxHigh - boxLow) : 0.5;
@@ -828,7 +839,7 @@
     var advice;
     if (amp < ampMin) advice = '箱体过窄(<' + ampMin + '%)，无操作空间，观望';
     else if (amp > ampMax) advice = '波动过大(>' + ampMax + '%)，属趋势行情，非震荡箱体';
-    else if (zone === '箱底区') advice = '箱底区：缩量企稳可半仓低吸；收盘破箱底止损';
+    else if (zone === '箱底区') advice = '箱底区：缩量企稳可≤30%分两笔低吸；收盘破箱底止损';
     else if (zone === '箱顶区') advice = '箱顶区：缩量滞涨减仓；放量突破再跟';
     else advice = '中部：不追不抄，等回箱底或放量破箱顶';
     return { boxHigh: boxHigh, boxLow: boxLow, amp: amp, cur: cur, pos: pos, zone: zone, advice: advice };
@@ -865,7 +876,7 @@
       cand.push({ symbol: y.symbol, name: name, price: tr, pct: cp, amt: amt, trn: trn });
     }
     cand.sort(function (a, b) { return b.amt - a.amt; });
-    var top = cand.slice(0, 12);
+    var top = cand.slice(0, 16);   // 取成交额前16只做K线精筛（周/月K线请求较重，适度放宽原12只限额）
     if (!top.length) return Promise.resolve({ count: 0, list: [], period: period });
     var jobs = top.map(function (c) {
       return fetchKlinePeriod(c.symbol, period, cfg.count).then(function (kl) {
@@ -878,13 +889,17 @@
         var cur = close[close.length - 1];
         if (box.amp < cfg.ampMin || box.amp > cfg.ampMax) return null;   // 非震荡箱体
         if (box.pos > cfg.posMax) return null;                            // 只在箱底区低吸
+        // 过滤上升通道个股：强上行趋势是"通道"而非"箱体"，列入箱底低吸会被误导"箱顶高抛卖飞"，应归趋势股模块处理
+        var drift = (close[close.length - 1] - close[0]) / Math.max(close[0], 1e-6) * 100;
+        if (drift > cfg.ampMin * 1.2) return null;   // 窗口内累计涨幅超箱体幅度阈值→判为上行通道，排除
         // —— 箱底低吸操作意见：买点=箱底支撑、止损=破箱底-4%、止盈=箱顶、仓位≤30% ——
         var buy1 = box.boxLow * 1.01;   // 箱底支撑附近
         var buy2 = box.boxLow * 0.97;   // 二次低吸/补仓
         var stop = box.boxLow * 0.96;   // 破箱底 -4% 止损
         var stopPct = (stop / cur - 1) * 100;
         var target = box.boxHigh * 0.98; // 箱顶附近止盈
-        var rrr = (target - cur) / Math.max(cur - stop, 1e-6);
+        var FEE = 0.0016;  // A股单边往返综合成本≈0.16%（高频网格累计不可忽视）
+        var rrr = (target - cur - FEE * cur) / Math.max(cur - stop - FEE * cur, 1e-6);
         return {
           symbol: c.symbol, name: c.name, price: cur, pct: c.pct, amp: box.amp, pos: box.pos,
           boxLow: box.boxLow, boxHigh: box.boxHigh, zone: box.zone, trn: c.trn,
@@ -1141,7 +1156,7 @@
       cand.push({ symbol: y.symbol, name: name, price: tr, pct: cp, amt: amt, nmc: nmc * 1e4, trn: trn });
     }
     cand.sort(function (a, b) { return b.amt - a.amt; });
-    var top = cand.slice(0, 12);   // 取成交额前12只做K线精筛（控制请求量）
+    var top = cand.slice(0, 20);   // 取成交额前20只做K线精筛（原限12只易漏掉中盘主升股；20只仍可控请求量）
     if (!top.length) return Promise.resolve({ count: 0, list: [], note: (p < 0.95 ? '盘中累计成交不足：已按时间进度放宽流动性门槛，仍无满足「换手/市值/温和涨幅」的候选' : '无满足流动性门槛的候选') });
     prog('筛选趋势股（精筛K线）…');
 
@@ -1171,7 +1186,10 @@
         var box = computeBox(high, low, close);
         var dev20 = (cc / ma20 - 1) * 100;                     // 价对MA20乖离%
         var vmaRatio = vma60 ? vma5 / vma60 : 1;
-        var strong = adx >= 25 && pdi > mdi;                   // 趋势强度判定
+        var trendUp = (cc > ma20) && (slope20 > 0.5) && (gain20 > 0);  // 价量趋势向上：站上MA20且斜率正、20日正收益
+        // 趋势强度判定：ADX≥25 为主判；ADX<25 但价量趋势明确向上(PDI>MDI+趋势向上+ADX≥18)亦视为强，
+        // 缓解 ADX 早期(刚启动)与末端(已高位钝化)的时滞误判
+        var strong = (adx >= 25 && pdi > mdi) || (pdi > mdi && trendUp && adx >= 18);
         var trendStr = strong ? '强多头' : (bull ? '多头' : '转弱');
         // 分级回踩买点：强趋势回踩MA10即买(破MA20离场)、普通趋势回踩MA20买(破MA60离场)
         var buyMA = strong ? ma10 : ma20;
@@ -1182,14 +1200,15 @@
         var stop = stopT > maxLoss ? maxLoss : stopT;
         var stopPct = (stop / cc - 1) * 100;
         var target = box.boxHigh > cc ? box.boxHigh : cc * 1.15;
-        var rrr = (target - cc) / Math.max(cc - stop, 1e-6);   // 风险收益比
+        var FEE = 0.0016;  // A股单边往返综合成本(佣金+印花税+过户费)≈0.16%
+        var rrr = (target - cc - FEE * cc) / Math.max(cc - stop - FEE * cc, 1e-6);   // 风险收益比(已计入交易成本)
         var devBuy = (cc / buyMA - 1) * 100;                  // 价对买点均线的乖离
         var aboveBuy = cc > buyMA;
         var atBuy = devBuy <= 3;   // 已回踩至买点均线附近(含微破)
         // 仓位建议（分级：强趋势看MA10、普通趋势看MA20 + 箱体位置）
         var posPct, posTxt;
         if (strong) {
-          if (atBuy) { posPct = '40–60%'; posTxt = '回踩'+buyMAName+'企稳即黄金买点，强趋势顺势低吸，单票≤30%分两笔，破MA20离场'; }
+          if (atBuy) { posPct = '≤30%'; posTxt = '回踩'+buyMAName+'企稳即黄金买点，强趋势顺势低吸，单票≤30%分两笔，破MA20离场'; }
           else if (aboveBuy) { posPct = '持有'; posTxt = '强趋势运行于'+buyMAName+'之上，持有不追高，破MA20减仓、破MA60清仓'; }
           else if (devBuy <= 8) { posPct = '≤30%'; posTxt = '回踩途中接近'+buyMAName+'，缩量企稳可低吸'; }
           else { posPct = '≤20%'; posTxt = '偏离均线过远，放弃追高，等回踩'+buyMAName+'/MA20再考虑'; }
@@ -1368,7 +1387,7 @@
         // 否则"指数涨但个股普跌"的背离只给"中等"，不夸大胜率（等权投票的修正）。
         if (u >= 4 && brVote === 'up') { regime = '单边上涨'; conf = '高置信'; }
         else if (d >= 4 && brVote === 'down') { regime = '单边下跌'; conf = '高置信'; }
-        else if (u === 3) { regime = '单边上涨'; conf = '中等'; }
+        else if (u === 3 && brVote !== 'down') { regime = '单边上涨'; conf = '中等'; }
         else if (d === 3) { regime = '单边下跌'; conf = '中等'; }
         else { regime = '震荡'; conf = (u + d) >= 3 ? '中等' : '偏弱'; }
 
@@ -1560,10 +1579,10 @@ function ctxOverlay(s, regime, conf){
   var strongBuy = (s.status==='pullback' && s.atBuy) || (s.strong && s.devBuy<=8);
   var act, pos, posTxt, stopPct = s.stopPct, tip, timing;
   if(regime==='单边上涨'){
-    if(strongBuy){ act='低吸/加仓'; pos = s.strong?'40–60%':s.posPct; posTxt = s.strong ? '顺势做多，回踩MA10即黄金买点，单票≤30%分两笔，破MA20离场' : '回踩MA20低吸，顺势轻仓试错，破MA60离场'; }
+    if(strongBuy){ act='低吸/加仓'; pos = '≤30%'; posTxt = s.strong ? '顺势做多，回踩MA10即黄金买点，单票≤30%分两笔，破MA20离场' : '回踩MA20低吸，顺势轻仓试错，破MA60离场'; }
     else if(s.strong && s.status==='trend'){ act='持有/等回踩'; pos='持有'; posTxt = s.strong ? '强趋势运行于MA10之上，持有不追高，破MA20减仓、破MA60清仓' : '站于MA20之上，持有不追，破MA60清仓'; }
     else { act='观望'; pos='≤20%'; posTxt = s.strong ? '强趋势偏离过远不追高，等回踩MA10/MA20' : '趋势强度不足(ADX<25)或回调未到买点，仅轻仓试错，强趋势等MA10、普通趋势等MA20'; }
-    tip='顺势不猜顶：强趋势回踩MA10即买(破MA20离场)、普通趋势回踩MA20买(破MA60离场)；不追乖离>15%的票；顶部信号(≥2项)共振时减仓。回踩买点可盘中低吸，重仓宜14:30后尾盘确认';
+    tip='顺势不猜顶：强趋势回踩MA10即买(破MA20离场)、普通趋势回踩MA20买(破MA60离场)；不追乖离>15%的票；顶部信号(≥2项)共振时减仓。回踩买点可盘中低吸，加仓宜14:30后尾盘确认(仅上涨/偏多日；单边下跌日严禁尾盘加仓——T+1次日才能卖，接飞刀风险最大)。⚠️ A股T+1：当日新买入仓当日不可卖，止损单只覆盖底仓；个股跌停封死时−5%/-7%止损单无法成交，须以"破位次日竞价离场"为兜底';
     timing='回踩买点可盘中低吸；重仓加仓宜14:30后尾盘确认，不竞价追高';
   } else if(regime==='震荡'){
     if(s.status==='pullback'&&s.atBuy){ act='箱底低吸'; pos='≤30%'; posTxt='震荡市只做回踩下轨/箱底低吸，不追突破'; }
@@ -1856,8 +1875,8 @@ function buildGate(d){
   auto+=`<div class="g-item"><span class="g-ic ${tempCls}">${tempCls==='bad'?'✕':'≈'}</span><span><b>情绪温度</b>：${tempTxt}${tempCls==='bad'?'（退潮，买点失效）':''}</span></div>`;
   const checks=[
     ['chk_buy','我买在回踩买点/箱底，非追高'],
-    ['chk_stop','我已预设止损位（破MA20/MA60即走，不挪止损/不补仓）'],
-    ['chk_single','本笔单票 ≤ 总仓 20%'],
+    ['chk_stop','我已预设止损位（破MA20/MA60即走，不挪止损/不补仓）；明白T+1下当日新买仓不可卖、跌停时止损单无法成交'],
+    ['chk_single','本笔单票 ≤ 总仓 30%（强趋势可至上限，弱市/试错 ≤20%）'],
     ['chk_emotion','我非因盘中诱多/翻盘幻想而冲动交易']
   ];
   const manual=checks.map(c=>`<label class="chk"><input type="checkbox" data-k="${c[0]}" ${st[c[0]]?'checked':''}> <span>${c[1]}</span></label>`).join('');
@@ -2056,6 +2075,20 @@ function renderDataAlarm(d){
   }
 }
 
+// 数据模式标识：明确告知用户当前看的是"实时"还是"收盘快照"，避免白天误把昨日收盘坐标当盘中决策依据
+function setDataMode(d){
+  const el=document.getElementById('dataMode'); if(!el) return;
+  const lb=document.getElementById('modeBtn'); if(lb){ lb.textContent = (d.mode==='direct') ? '切快照' : '切实时'; }
+  if(d.mode==='direct'){
+    el.className='datamode live';
+    el.innerHTML='🟢 实时行情（LIVE）· 行情时间 '+ (d.updated||'') + '（盘中每1秒刷新；趋势股/箱底个股为当日实时坐标）';
+  }else{
+    const td = d.trade_date || (String(d.updated||'').replace('云端 ','')) || '未知';
+    el.className='datamode snap';
+    el.innerHTML='🟠 快照数据（收盘）· 数据日期 '+ td + ' · 此为收盘后坐标，盘中请用「切实时」查看当日；趋势股/箱底个股仅实时模式可用';
+  }
+}
+
 // 行情操作台：按当前行情动态给出策略/仓位/标的/买卖点
 function renderPlaybook(d){
   const row=(lb,val)=>`<div class="row"><span class="lb">${lb}</span><span class="v">${val}</span></div>`;
@@ -2063,13 +2096,13 @@ function renderPlaybook(d){
   const dsg=(x)=>(x>=0?'+':'')+x.toFixed(2)+'%';
   p+=row('行情', `${d.regime}·${d.conf} → 仓位 <b>${d.position}</b><br><span style="color:var(--sub);font-size:11.5px">今日 ${dsg(d.idx_today||0)}（盘中） · 近20日 ${dsg(d.idx20||0)}${(d.idx_today>0&&d.idx20<0)?' · 单日反弹未改趋势':''}</span>`);
   if(d.regime==='单边上涨'){
-    p+=row('中军', `见下方「趋势股候选」卡 · 回踩均线低吸 · 止损-5% · 仓位30–50%`);
+    p+=row('中军', `见下方「趋势股候选」卡 · 回踩均线低吸 · 止损-5% · 单票≤30%分两笔`);
   }else if(d.regime==='震荡'){
     p+=row('策略', `箱底缩量低吸、箱顶缩量卖、放量突破才跟`);
     if(d.box){
-      p+=row('箱体', `${d.box.boxLow.toFixed(0)} ~ ${d.box.boxHigh.toFixed(0)} · ${d.box.zone} · 半仓低吸、破箱底止损`);
+      p+=row('箱体', `${d.box.boxLow.toFixed(0)} ~ ${d.box.boxHigh.toFixed(0)} · ${d.box.zone} · ≤30%低吸、破箱底止损`);
     }
-    p+=row('标的', `见下方「震荡标的」卡 · 止损-3~5% · 仓位≤50%`);
+    p+=row('标的', `见下方「震荡标的」卡 · 止损-3~5% · 单票≤30%`);
   }else{
     p+=row('操作', `现金为王，首选空仓<br>防御仅配红利/银行/债券/黄金ETF`);
     p+=row('现金', `国债逆回购、货币ETF、黄金ETF`);
@@ -2312,7 +2345,7 @@ async function renderBoxTrade(period, force){
       stocksHtml+='<div class="bt-empty">个股箱底筛选需实时全量数据（盘中实时模式）；当前为快照/数据未就绪，仅展示大盘箱体。</div>';
     }
     stocksHtml+='</div>';
-    const note='<div class="bt-note">周期说明：仅做 <b>日 / 周 / 月</b> 级别箱体（每个K线柱=1日/1周/1月）。日内分时震荡属短线，不做。箱体幅度需适中（'+cfg.ampMin+'%–'+cfg.ampMax+'%），过窄无空间、过宽即趋势。箱底=缩量企稳低吸，箱顶=减仓高抛；破箱底止损、破箱顶（放量）再看是否转势。</div>';
+    const note='<div class="bt-note">周期说明：仅做 <b>日 / 周 / 月</b> 级别箱体（每个K线柱=1日/1周/1月）。日内分时震荡属短线，不做。箱体幅度需适中（'+cfg.ampMin+'%–'+cfg.ampMax+'%），过窄无空间、过宽即趋势。箱底=缩量企稳低吸，箱顶=减仓高抛；破箱底止损、破箱顶（放量）再看是否转势。'+(period!=='day'?'<br>⚠️ 周/月箱体基于截至上一交易日的周/月K线<b>收盘</b>坐标，盘中「周/月箱底」以最近周期坐标为准——若本周/月已明显突破，实际早已脱离箱底，勿按旧坐标抄底。':'')+'</div>';
     const html=mktHtml+stocksHtml+note;
     _boxCache[period]={ts:now, html:html};
     if(loadBoxPeriod()===period) el.innerHTML=html;
@@ -2348,7 +2381,9 @@ function renderBoxStock(s){
     +'<span>止盈(箱顶)</span><b>¥'+s.target.toFixed(2)+'</b>'
     +'<span>仓位</span><b>≤30% 分两笔</b>'
     +'<span>盈亏比</span><b class="'+(rrrWarn?'bt-warn':'bt-ok')+'">'+rrrTxt+'</b>'
-    +'</div></div>';
+    +'</div>'
+    +'<div style="color:var(--down);font-size:10.5px;margin-top:3px;line-height:1.5">⚠️ A股T+1：当日新买仓位当日不可卖，止损单只覆盖底仓；个股跌停封死时−4%止损单无法成交，破位须次日竞价离场</div>'
+    +'</div>';
 }
 function initBoxTradeSel(){
   const sel=document.getElementById('btSel'); if(!sel) return;
@@ -2361,6 +2396,7 @@ initBoxTradeSel();
 
 function render(d){
   renderDataAlarm(d);
+  setDataMode(d);
   setStatus('更新 '+d.updated+' · '+d.cost_ms+'ms');
   const order=[['sh000001','上证'],['sz399001','深证'],['sz399006','创业板'],['sh000680','科创综指'],['sz399317','全A指数']];
   let h='';
@@ -2492,11 +2528,16 @@ async function buildAnalysisFromSnapshot(snap){
   a.ticks=tick;
   a.updated='云端 '+snap.meta.generated_at;
   a.cost_ms=snap.meta.cost_ms||0;
+  a.trade_date = snap.meta.trade_date || String(snap.meta.generated_at||'').slice(0,10);
   a.mode='snapshot';
   a.data_ok = snap.meta.data_ok;
   a.data_warn = snap.meta.data_warn || [];
-  a.trend=a.trend||{count:0,list:[],watch:[]};
-  a.range=a.range||{count:0,list:[]};
+  // 快照仅含趋势股/箱底个股的精简候选(symbol/name/price…)，缺少前端逐股分析所需的买卖点/均线/箱体字段；
+  // 这些字段需盘中实时K线计算，快照模式不渲染明细卡（避免页面报错），并提示「切实时」查看
+  var _t0=a.trend||{};
+  if(!(_t0.list&&_t0.list.length&&_t0.list[0].buy1!==undefined)){ a.trend={count:0,list:[],watch:[],note:'快照模式趋势股需实时K线，请点「切实时」查看当日买卖点'}; }
+  var _r0=a.range||{};
+  if(!(_r0.list&&_r0.list.length&&_r0.list[0].buy1!==undefined)){ a.range={count:0,list:[],note:'快照模式箱底个股需实时全量数据，请点「切实时」查看'}; }
   a.concept=a.concept||[];
   a.concept_strength=a.concept_strength||[];
   // 已计算好的结果以 Promise.resolve 包裹，复用现有 render 逻辑
@@ -2573,6 +2614,11 @@ async function load(){
   loading=false;
 }
 document.getElementById('rf').onclick=function(){ load(); };
+document.getElementById('modeBtn').onclick=function(){
+  const u=new URLSearchParams(location.search);
+  if(/live=1/.test(location.search)){ u.delete('live'); } else { u.set('live','1'); }
+  location.search = u.toString();
+};
 load();
 setInterval(load,60000);
 

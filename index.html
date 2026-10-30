@@ -1173,31 +1173,40 @@
         var vmaRatio = vma60 ? vma5 / vma60 : 1;
         var strong = adx >= 25 && pdi > mdi;                   // 趋势强度判定
         var trendStr = strong ? '强多头' : (bull ? '多头' : '转弱');
-        // 买卖点（技术位）：主买点回踩MA20、次买点MA60支撑、止损取MA60/箱底较高者但不劣于-7%、目标取阶段前高
-        var buy1 = ma20, buy2 = ma60;
-        var stopT = Math.max(ma60, box.boxLow);
+        // 分级回踩买点：强趋势回踩MA10即买(破MA20离场)、普通趋势回踩MA20买(破MA60离场)
+        var buyMA = strong ? ma10 : ma20;
+        var buyMAName = strong ? 'MA10' : 'MA20';
+        var buy1 = buyMA, buy2 = strong ? ma20 : ma60;
+        var stopT = strong ? ma20 : Math.max(ma60, box.boxLow);
         var maxLoss = cc * 0.93;                               // 趋势/低吸 -7% 硬砍上限
         var stop = stopT > maxLoss ? maxLoss : stopT;
         var stopPct = (stop / cc - 1) * 100;
         var target = box.boxHigh > cc ? box.boxHigh : cc * 1.15;
         var rrr = (target - cc) / Math.max(cc - stop, 1e-6);   // 风险收益比
-        // 仓位建议（乖离 + 趋势强度 + 箱体位置）
+        var devBuy = (cc / buyMA - 1) * 100;                  // 价对买点均线的乖离
+        var aboveBuy = cc > buyMA;
+        var atBuy = devBuy <= 3;   // 已回踩至买点均线附近(含微破)
+        // 仓位建议（分级：强趋势看MA10、普通趋势看MA20 + 箱体位置）
         var posPct, posTxt;
         if (strong) {
-          if (dev20 <= 8) { posPct = '30–50%'; posTxt = '回踩MA20低吸，强趋势顺势，单票≤30%分两笔'; }
-          else if (dev20 <= 15) { posPct = '≤30%'; posTxt = '趋势强但已偏离均线，仅回踩后介入，不追高'; }
-          else { posPct = '≤20%'; posTxt = '乖离过大，放弃追高，等回踩MA20再考虑'; }
-        } else { posPct = '≤20%'; posTxt = '趋势强度不足(ADX<25)，仅轻仓试错/观察'; }
+          if (atBuy) { posPct = '40–60%'; posTxt = '回踩'+buyMAName+'企稳即黄金买点，强趋势顺势低吸，单票≤30%分两笔，破MA20离场'; }
+          else if (aboveBuy) { posPct = '持有'; posTxt = '强趋势运行于'+buyMAName+'之上，持有不追高，破MA20减仓、破MA60清仓'; }
+          else if (devBuy <= 8) { posPct = '≤30%'; posTxt = '回踩途中接近'+buyMAName+'，缩量企稳可低吸'; }
+          else { posPct = '≤20%'; posTxt = '偏离均线过远，放弃追高，等回踩'+buyMAName+'/MA20再考虑'; }
+        } else {
+          if (atBuy) { posPct = '≤30%'; posTxt = '回踩'+buyMAName+'低吸，普通趋势轻仓试错，破MA60离场'; }
+          else if (aboveBuy) { posPct = '持有'; posTxt = '站于'+buyMAName+'之上，持有不追，破MA60清仓'; }
+          else { posPct = '≤20%'; posTxt = '趋势强度不足(ADX<25)，仅回踩'+buyMAName+'后轻仓试错'; }
+        }
         if (box.zone === '箱顶区') { posPct = '≤20%'; posTxt = '处箱顶区，减仓/不追，等回箱底'; }
-        // 状态分类：强势运行中(站上MA20且当日收红) vs 回调(趋势签名intact但回踩中)
-        var isTrend = above20 && cp > 0;
-        if (!isTrend && dev20 < -8) return null;   // 回踩过深(跌破MA20超8%)疑似转势，不列为买点
-        var atBuy = dev20 <= 3;   // 已回踩至MA20买点附近(含微破)
+        // 状态分类：强势运行中(站上买点均线且当日收红) vs 回调(趋势签名intact但回踩中)
+        var isTrend = aboveBuy && cp > 0;
+        if (dev20 < -8) return null;   // 跌破MA20超8%疑似转势，不列为买点
         var status = isTrend ? 'trend' : 'pullback';
         return {
           symbol: c.symbol, name: c.name, price: cc, pct: c.pct, amt: c.amt, trn: c.trn, gain20: gain20,
           adx: adx, pdi: pdi, mdi: mdi, trendStr: trendStr, strong: strong,
-          ma5: ma5, ma10: ma10, ma20: ma20, ma60: ma60, dev20: dev20, slope20: slope20,
+          ma5: ma5, ma10: ma10, ma20: ma20, ma60: ma60, dev20: dev20, devBuy: devBuy, buyMAName: buyMAName, slope20: slope20,
           boxPos: box.pos, boxZone: box.zone, boxLow: box.boxLow, boxHigh: box.boxHigh,
           vmaRatio: vmaRatio,
           buy1: buy1, buy2: buy2, stop: stop, stopPct: stopPct, target: target, rrr: rrr,
@@ -1548,13 +1557,13 @@ window.addEventListener('unhandledrejection',function(e){ setStatus('异步错�
 // 个股自身的买卖点、均线、箱体已在引擎算好；这里按 regime 调整 动作/仓位/止损/提示/时机
 function ctxOverlay(s, regime, conf){
   regime = regime || '震荡'; conf = conf || '';
-  var strongBuy = (s.status==='pullback' && s.atBuy) || (s.strong && s.dev20<=8);
+  var strongBuy = (s.status==='pullback' && s.atBuy) || (s.strong && s.devBuy<=8);
   var act, pos, posTxt, stopPct = s.stopPct, tip, timing;
   if(regime==='单边上涨'){
-    if(strongBuy){ act='低吸/加仓'; pos = (s.strong&&s.dev20<=8)?'40–60%':s.posPct; posTxt='顺势做多，回踩MA20即黄金买点，单票≤30%分两笔，移动止盈（破MA60清仓）'; }
-    else if(s.strong && s.status==='trend'){ act='持有/等回踩'; pos='持有'; posTxt='已涨高不追，沿MA20持仓，破MA60清仓，不猜顶'; }
-    else { act='观望'; pos='≤20%'; posTxt='趋势强度不足(ADX<25)或回调未到买点，仅轻仓试错/观察，等回踩MA20'; }
-    tip='顺势不猜顶：不追乖离>15%的票；顶部信号(≥2项)共振时减仓。回踩买点可盘中低吸，重仓宜14:30后尾盘确认';
+    if(strongBuy){ act='低吸/加仓'; pos = s.strong?'40–60%':s.posPct; posTxt = s.strong ? '顺势做多，回踩MA10即黄金买点，单票≤30%分两笔，破MA20离场' : '回踩MA20低吸，顺势轻仓试错，破MA60离场'; }
+    else if(s.strong && s.status==='trend'){ act='持有/等回踩'; pos='持有'; posTxt = s.strong ? '强趋势运行于MA10之上，持有不追高，破MA20减仓、破MA60清仓' : '站于MA20之上，持有不追，破MA60清仓'; }
+    else { act='观望'; pos='≤20%'; posTxt = s.strong ? '强趋势偏离过远不追高，等回踩MA10/MA20' : '趋势强度不足(ADX<25)或回调未到买点，仅轻仓试错，强趋势等MA10、普通趋势等MA20'; }
+    tip='顺势不猜顶：强趋势回踩MA10即买(破MA20离场)、普通趋势回踩MA20买(破MA60离场)；不追乖离>15%的票；顶部信号(≥2项)共振时减仓。回踩买点可盘中低吸，重仓宜14:30后尾盘确认';
     timing='回踩买点可盘中低吸；重仓加仓宜14:30后尾盘确认，不竞价追高';
   } else if(regime==='震荡'){
     if(s.status==='pullback'&&s.atBuy){ act='箱底低吸'; pos='≤30%'; posTxt='震荡市只做回踩下轨/箱底低吸，不追突破'; }
@@ -1599,8 +1608,8 @@ function renderTrend(t, regime, conf, d){
         : '<span class="tag" style="color:var(--blue);border-color:var(--blue)">中军</span>';
       const roleBlock = ra ? `<div class="tc-role">🎯 <b>角色联动（单边上涨·${roleName}）</b>：买点 ${ra.buy} ｜ 仓位 ${ra.pos} ｜ 止损 ${ra.stop} ｜ 离场 ${ra.exit}</div>` : '';
       const stopPrice = s.price * (1 + o.stopPct/100);   // 止损价随环境收紧同步重算
-      const buyHint = (s.status==='pullback'&&s.atBuy) ? ' · <b style="color:var(--up)">已回踩至买点附近</b>'
-                    : ((s.status==='pullback') ? ' · 回调中(等MA20)' : '');
+      const buyHint = (s.status==='pullback'&&s.atBuy) ? ' · <b style="color:var(--up)">已回踩至'+s.buyMAName+'买点附近</b>'
+                    : ((s.status==='pullback') ? ' · 回调中(等'+s.buyMAName+')' : '');
       const actCls = o.act.indexOf('空仓')>=0 ? 't-off' : (o.act.indexOf('减仓')>=0||o.act.indexOf('观望')>=0) ? 't-warn' : 't-on';
       return `<div class="tcard">
         <div class="tc-h"><span class="nm">${i+1}. ${s.name}</span><span class="px">¥${s.price.toFixed(2)}</span><span class="up">+${s.pct.toFixed(2)}%</span><span class="sub">20日+${s.gain20.toFixed(1)}%</span><span class="sub">额${(s.amt/1e8).toFixed(0)}亿</span><span class="sub">换${s.trn!=null?s.trn.toFixed(0)+'%':'—'}</span></div>
@@ -1608,12 +1617,12 @@ function renderTrend(t, regime, conf, d){
           ${roleTag}
           <span class="tag ${tagCls}">${tagTxt}</span>
           <span class="tag ${s.strong?'t-on':'t-off'}">${s.trendStr} · ADX${s.adx.toFixed(0)} +DI${s.pdi.toFixed(0)}</span>
-          <span class="tag">均线乖离 ${s.dev20>=0?'+':''}${s.dev20.toFixed(1)}%</span>
+          <span class="tag">回踩位${s.buyMAName}乖离 ${s.devBuy>=0?'+':''}${s.devBuy.toFixed(1)}%</span>
           <span class="tag">量比${s.vmaRatio.toFixed(2)}</span>
           <span class="tag">箱体${s.boxZone}(${(s.boxPos*100).toFixed(0)}%)</span>
           ${s.rrr<1.5?'<span class="tag t-off">⚠️ 盈亏比&lt;1.5 慎动手</span>':''}
         </div>
-        <div class="tc-t">买点 回踩<b>¥${s.buy1.toFixed(2)}</b>(MA20) / 支撑<b>¥${s.buy2.toFixed(2)}</b>(MA60) · 止损<b>¥${stopPrice.toFixed(2)}</b>(${o.stopPct.toFixed(1)}%) · 目标<b>¥${s.target.toFixed(2)}</b> · 盈亏比<b class="${s.rrr<1.5?'rrr-bad':''}">${s.rrr.toFixed(1)}</b></div>
+        <div class="tc-t">买点 回踩<b>¥${s.buy1.toFixed(2)}</b>(${s.buyMAName}) / 支撑<b>¥${s.buy2.toFixed(2)}</b>(${s.strong?'MA20':'MA60'}) · 止损<b>¥${stopPrice.toFixed(2)}</b>(${o.stopPct.toFixed(1)}%) · 目标<b>¥${s.target.toFixed(2)}</b> · 盈亏比<b class="${s.rrr<1.5?'rrr-bad':''}">${s.rrr.toFixed(1)}</b></div>
         <div class="tc-act"><span class="tag ${actCls}">${o.act}</span> 仓位 <b>${o.pos}</b> · ${o.posTxt}${buyHint}</div>
         <div class="tc-tip">🛡️ ${o.tip}<br>⏱️ 时机：${o.timing}</div>
         ${roleBlock}
@@ -1622,7 +1631,7 @@ function renderTrend(t, regime, conf, d){
     const L=t.list||[], W=t.watch||[];
     const rc=regime==='单边上涨'?'var(--up)':regime==='单边下跌'?'var(--down)':'var(--side)';
     const ruleMap={
-      '单边上涨':'顺势做多：回踩MA20是黄金买点，可积极低吸/加仓，移动止盈，不猜顶。',
+      '单边上涨':'顺势做多：强趋势回踩MA10即买点(破MA20离场)、普通趋势回踩MA20买(破MA60离场)，移动止盈，不猜顶。',
       '震荡':'区间思维：仅回踩下轨/箱底低吸，不追突破，上沿即减，快进快出，止损收紧至-5%。',
       '单边下跌':'现金为王：原则上不碰趋势股；逆势强股仅右侧试仓≤20%，破MA20即走，不抄底。'
     };
@@ -1632,7 +1641,7 @@ function renderTrend(t, regime, conf, d){
       th+=L.map((s,i)=>card(s,i,'▲ 强势','t-on')).join('');
     }
     if(W.length){
-      th+='<div class="tw-h warn">▶ 回调至买点（'+W.length+'）· 等回踩MA20低吸，不追高</div>';
+      th+='<div class="tw-h warn">▶ 回调至买点（'+W.length+'）· 强趋势等MA10、普通趋势等MA20 低吸，不追高</div>';
       th+=W.map((s,i)=>card(s,i,'↓ 回调·买点','t-off')).join('');
     }
     if(!L.length&&!W.length){
@@ -1674,7 +1683,7 @@ function roleAdvice(role, regime){
   if(role==='core'){
     return {
       note: down ? '熊市无真中军，多为防御/庄股，风险高' : '板块内大市值成交核心、走势稳健的“定海神针”，沿 MA20/60 趋势上行',
-      buy: up ? '沿 MA20/60 上行中回踩不破即加；首仓逢缩量回踩' : (down ? '不参与' : '回踩 MA20 不破低吸，箱顶不追'),
+      buy: up ? '回踩 MA10/20 不破即加；首仓逢缩量回踩' : (down ? '不参与' : '回踩 MA20 不破低吸，箱顶不追'),
       pos: up ? '30–60%（稳健可重）' : (down ? '0–10%' : '≤30%'),
       stop: up ? 'MA20 下方 −5%~−8%' : '−5%',
       exit: '跌破 MA60 清仓；板块主线结束走'

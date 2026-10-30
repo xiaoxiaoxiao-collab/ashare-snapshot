@@ -12,7 +12,8 @@
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   body{margin:0;background:var(--bg);color:var(--txt);font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;font-size:15px;padding:12px 12px 40px}
-  .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px}
+  .topfix{position:sticky;top:0;z-index:100;margin:-12px -12px 8px;padding:12px 12px 8px;background:var(--bg);border-bottom:1px solid rgba(255,255,255,.05)}
+  .top{display:flex;justify-content:space-between;align-items:center;gap:8px}
   .top h1{font-size:17px;margin:0;font-weight:700;white-space:nowrap;flex-shrink:0}
   .top .upd{font-size:11px;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:58vw;margin-left:auto}
   .btn{background:var(--card);border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:6px 12px;font-size:13px}
@@ -216,7 +217,7 @@
   .journal .j-empty{color:var(--sub);font-size:11.5px;line-height:1.6}
 
   /* 纪律常驻横幅 */
-  .disc-banner{position:sticky;top:0;z-index:50;margin:6px 0;padding:9px 12px;border-radius:8px;font-weight:700;font-size:13px;line-height:1.5;box-shadow:0 2px 8px rgba(0,0,0,.3)}
+  .disc-banner{margin:6px 0 0;padding:9px 12px;border-radius:8px;font-weight:700;font-size:13px;line-height:1.5;box-shadow:0 2px 8px rgba(0,0,0,.3)}
   .disc-banner.down{background:rgba(248,113,113,.18);border:1px solid var(--down);color:#fca5a5}
   .disc-banner.side{background:rgba(250,204,21,.14);border:1px solid var(--side);color:#fde047}
   .disc-banner.up{background:rgba(74,222,128,.14);border:1px solid var(--up);color:#86efac}
@@ -268,17 +269,19 @@
 </style>
 </head>
 <body>
-  <div class="top">
-    <h1>📊 五维共振 <span class="livebadge" id="liveBadge" style="display:none"></span></h1>
-    <div style="text-align:right">
-      <div class="upd" id="upd">加载中…</div>
-      <button class="btn" id="rf" style="margin-top:4px">刷新</button>
+  <div class="topfix">
+    <div class="top">
+      <h1>📊 五维共振 <span class="livebadge" id="liveBadge" style="display:none"></span></h1>
+      <div style="text-align:right">
+        <div class="upd" id="upd">加载中…</div>
+        <button class="btn" id="rf" style="margin-top:4px">刷新</button>
+      </div>
     </div>
+
+    <div class="disc-banner" id="discBanner"></div>
   </div>
 
   <div id="dataAlarm"></div>
-
-  <div class="disc-banner" id="discBanner"></div>
 
   <div class="ticks" id="ticks"></div>
 

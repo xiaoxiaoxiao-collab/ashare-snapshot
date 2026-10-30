@@ -844,6 +844,9 @@
       month: { win: 36, ampMin: 12, ampMax: 40, posMax: 0.50, count: 60  }
     }[period];
     var cand = [];
+    var p = intradayProgress();                         // 盘中按时间进度缩放全天级门槛
+    var amtThr = Math.max(1e8, 3e8 * p);                // 成交额门槛：收盘3亿，盘中动态放宽（下限1亿）
+    var trnMin = Math.max(1, 3 * p);                    // 换手下限：收盘3%，盘中放宽（下限1%）
     for (var i = 0; i < rows.length; i++) {
       var y = rows[i];
       var name = (y.name || '').trim();
@@ -856,8 +859,8 @@
       if (/ST/i.test(name)) continue;
       if (name.charAt(0) === 'N' || name.charAt(0) === 'C') continue;
       if (nmc * 1e4 < 80e8) continue;                    // 流通市值≥80亿
-      if (amt < 3e8) continue;                           // 成交额≥3亿
-      if (trn < 3 || trn > 15) continue;                 // 换手3%–15%
+      if (amt < amtThr) continue;                         // 成交额 ≥ 动态门槛
+      if (trn < trnMin || trn > 15) continue;             // 换手 动态下限%–15%
       if (cp <= -3 || cp >= 3) continue;                 // 当日温和（震荡股不应大涨大跌）
       cand.push({ symbol: y.symbol, name: name, price: tr, pct: cp, amt: amt, trn: trn });
     }
@@ -1097,6 +1100,18 @@
     };
   }
 
+  // 盘中时间进度因子（0~1）：A股成交呈U型（早盘/尾盘密、午间稀）。
+  // 把“全天级”流动性门槛按当前交易分钟缩放，避免上午因累计成交不足而筛不出候选。
+  // 非交易时段返回 1（用全天标准，不影响盘后/快照口径）。
+  function intradayProgress() {
+    var d = new Date(), m = d.getHours() * 60 + d.getMinutes();
+    if (m < 570 || m > 900) return 1;                 // 盘前/午休/盘后/休市：用全天标准
+    var am = (m >= 570 && m <= 690) ? (m - 570) : 0;  // 9:30-11:30
+    var pm = (m >= 780 && m <= 900) ? (m - 780) : 0;  // 13:00-15:00
+    var w = (am * 1.35 + pm * 1.1) / 240;             // 早盘权重略高，拟合U型累计占比
+    return Math.min(Math.max(w, 0.12), 1);             // 下限0.12：刚开盘避免门槛过低
+  }
+
   // 趋势股（中军/容量核心）筛选：流动性门槛(实时字段) → 均线多头 + 均量线多头 + 相对强度(历史K线)
   // 输入: rows = 新浪 hs_a 全量(含 amount成交额元 / nmc流通市值万元 / turnoverratio换手%)
   //       shGain20 = 上证指数近20日涨幅%
@@ -1104,6 +1119,9 @@
   // 第二层(拉K线): MA5>MA10>MA20>MA60 且 VMA5>VMA60 且 收盘>MA20 且 20日涨幅>上证20日涨幅
   function screenTrendStocks(rows, shGain20) {
     if (!rows || !rows.length) return Promise.resolve({ count: 0, list: [], note: '无全量数据' });
+    var p = intradayProgress();                       // 盘中按时间进度缩放全天级门槛
+    var amtThr = Math.max(3e8, 20e8 * p);             // 成交额门槛：收盘20亿，盘中动态放宽（下限3亿）
+    var trnMin = Math.max(1, 5 * p);                  // 换手下限：收盘5%，盘中放宽（下限1%）
     var cand = [];
     for (var i = 0; i < rows.length; i++) {
       var y = rows[i];
@@ -1117,14 +1135,14 @@
       if (/ST/i.test(name)) continue;                   // 排除ST
       if (name.charAt(0) === 'N' || name.charAt(0) === 'C') continue;
       if (nmc * 1e4 < 80e8) continue;                   // 流通市值 ≥ 80亿
-      if (amt < 20e8) continue;                          // 成交额 ≥ 20亿
-      if (trn < 5 || trn > 30) continue;                 // 换手 5%–30%
+      if (amt < amtThr) continue;                        // 成交额 ≥ 动态门槛
+      if (trn < trnMin || trn > 30) continue;            // 换手 动态下限%–30%
       if (cp < -6 || cp >= 7) continue;                  // 趋势股：温和上涨；允许≤6%的回调日(回踩买点)进入K线精筛，排除暴跌与已涨停
       cand.push({ symbol: y.symbol, name: name, price: tr, pct: cp, amt: amt, nmc: nmc * 1e4, trn: trn });
     }
     cand.sort(function (a, b) { return b.amt - a.amt; });
     var top = cand.slice(0, 12);   // 取成交额前12只做K线精筛（控制请求量）
-    if (!top.length) return Promise.resolve({ count: 0, list: [], note: '无满足流动性门槛的候选' });
+    if (!top.length) return Promise.resolve({ count: 0, list: [], note: (p < 0.95 ? '盘中累计成交不足：已按时间进度放宽流动性门槛，仍无满足「换手/市值/温和涨幅」的候选' : '无满足流动性门槛的候选') });
     prog('筛选趋势股（精筛K线）…');
 
     var jobs = top.map(function (c) {
@@ -2341,7 +2359,7 @@ function render(d){
     const t=d.ticks&&d.ticks[k]; if(!t) continue;
     const col=t.chg>=0?'var(--up)':'var(--down)';
     const sign=t.chg>=0?'+':'';
-    h+=`<div class="tick"><div class="nm">${nm}</div><div class="px" style="color:${col}">${fmt(t.cur,0)}</div><div class="ch" style="color:${col}">${sign}${fmt(t.chg,2)}%</div></div>`;
+    h+=`<div class="tick"><div class="nm">${nm}</div><div class="px" style="color:${col}">${fmt(t.cur,2)}</div><div class="ch" style="color:${col}">${sign}${fmt(t.chg,2)}%</div></div>`;
   }
   document.getElementById('ticks').innerHTML=h||'<div class="tick"><div class="nm">实时报价不可用</div></div>';
   const rc=d.regime==='单边上涨'?'var(--up)':d.regime==='单边下跌'?'var(--down)':'var(--side)';
@@ -2585,7 +2603,7 @@ function renderLive(d){
       const t=d.ticks&&d.ticks[k]; if(!t) continue;
       const col=t.chg>=0?'var(--up)':'var(--down)';
       const sign=t.chg>=0?'+':'';
-      h+=`<div class="tick"><div class="nm">${nm}</div><div class="px" style="color:${col}">${fmt(t.cur,0)}</div><div class="ch" style="color:${col}">${sign}${fmt(t.chg,2)}%</div></div>`;
+      h+=`<div class="tick"><div class="nm">${nm}</div><div class="px" style="color:${col}">${fmt(t.cur,2)}</div><div class="ch" style="color:${col}">${sign}${fmt(t.chg,2)}%</div></div>`;
     }
     if(h) document.getElementById('ticks').innerHTML=h;
     const rc=d.regime==='单边上涨'?'var(--up)':d.regime==='单边下跌'?'var(--down)':'var(--side)';

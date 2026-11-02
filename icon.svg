@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#0d1117"/>
+  <polyline points="96,360 192,280 288,320 416,160" fill="none" stroke="#ff4d4f" stroke-width="36" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="416" cy="160" r="28" fill="#3b82f6"/>
+  <text x="256" y="452" font-family="-apple-system,Segoe UI,sans-serif" font-size="72" font-weight="700" fill="#e6edf3" text-anchor="middle">五维</text>
+</svg>

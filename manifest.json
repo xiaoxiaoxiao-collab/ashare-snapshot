@@ -1,0 +1,14 @@
+{
+  "name": "五维共振 · A股实战助手",
+  "short_name": "五维共振",
+  "description": "A股行情实战手册辅助决策器",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0d1117",
+  "theme_color": "#0d1117",
+  "icons": [
+    { "src": "./icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

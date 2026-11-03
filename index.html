@@ -582,14 +582,13 @@
     [ ] 是否违反当前行情禁忌（震荡追涨 / 下跌抄底）？
   </div>
 
-  <div class="sec-t">🧊 亏损冷却自检（双触发收缩/停机 · 防"交易-亏损"恶性循环 · 手动记录）</div>
+  <div class="sec-t">🧊 亏损冷却自检（防"交易-亏损"恶性循环 · 手动记录）</div>
   <div class="cool" id="coolPanel">
-    <div class="cool-desc">工具不读取实盘账户。请按今日账户真实情况填写，系统按<b>「单笔幅度 × 连亏笔数」双触发</b>给出<b>冷却等级</b>与硬指令（基于 2025 年 125 笔真实交割单回溯）。<br>阈值：🔴 单笔≤−8% 或 连亏≥3笔 或 单日回撤≥3% 或 月回撤≥8% → 强制停机；🟡 单笔≤−5% 或 连亏=2笔 或 单日回撤≥1.5% → 收缩。</div>
+    <div class="cool-desc">工具不读取实盘账户。请按今日账户真实情况填写，系统给出<b>冷却等级</b>与硬指令。分仓参考阈值：<b>单日回撤≥3% 停手；月累计回撤≥8% 强制休整 3–5 日；连亏≥2 笔即收缩</b>。</div>
     <div class="cool-row">
       <label>今日账户回撤 %<input type="number" id="coolDay" step="0.1" min="0" placeholder="0"></label>
       <label>连续亏损笔数<input type="number" id="coolStreak" step="1" min="0" placeholder="0"></label>
       <label>本月累计回撤 %<input type="number" id="coolMonth" step="0.1" min="0" placeholder="0"></label>
-      <label>单笔最大亏损 %<input type="number" id="coolSingle" step="0.1" min="0" placeholder="0"></label>
     </div>
     <div class="cool-out" id="coolOut">填写后自动判定 →</div>
     <div class="cool-trap" id="coolTrap"></div>
@@ -2799,27 +2798,14 @@ function renderCooldown(){
   var d=parseFloat(document.getElementById('coolDay').value)||0;
   var s=parseInt(document.getElementById('coolStreak').value)||0;
   var m=parseFloat(document.getElementById('coolMonth').value)||0;
-  var sp=parseFloat(document.getElementById('coolSingle').value)||0; // 单笔最大亏损幅度 % (>=0)
   var cls,title,sub;
-  var red=[], yellow=[];
-  // 🔴 强制停机（不可商量红线）
-  if(sp>=8) red.push('单笔亏损≥8%（清掉该标的+全局冷却1天）');
-  if(s>=3) red.push('连续亏损≥3笔');
-  if(d>=3) red.push('单日回撤≥3%');
-  if(m>=8) red.push('月累计回撤≥8%');
-  // 🟡 收缩（黄区：仍可在场内，只减不加）
-  if(sp>=5) yellow.push('单笔亏损≥5%（立即减半仓+当日停开新仓）');
-  if(s===2) yellow.push('连续亏损2笔（降仓、不开新仓、进入自检）');
-  if(s>=2 && m>0.5) yellow.push('月内已转负+≥2连亏（当月转防守）');
-  if(d>=1.5) yellow.push('单日回撤1.5%–3%');
-  if(s>=1) yellow.push('出现首笔亏损');
-  if(red.length){
+  if(s>=2 || d>=3 || m>=8){
     cls='cool-red'; title='🔴 强制停机 · 关机冷却';
-    sub='已触发熔断（'+red.join(' · ')+'）。<b>立即停止开新仓、关闭交易软件</b>，休息 1–2 个交易日（月回撤触线则 3–5 日），复盘情绪与体系后再回。坏市场里的挣扎，平手已是满分。';
-    if(sp>=8) sub+='单笔已≤−8%：先清掉该标的，再进入冷却。';
-  } else if(yellow.length){
+    var why=[]; if(s>=2) why.push('连续亏损≥2笔'); if(d>=3) why.push('单日回撤≥3%'); if(m>=8) why.push('月累计回撤≥8%');
+    sub='已触发熔断（'+why.join(' · ')+'）。<b>立即停止开新仓</b>，关闭交易软件，休息 3–5 个交易日，复盘情绪与体系后再回。坏市场里的挣扎，平手已是满分。';
+  } else if(d>=1.5 || s>=1){
     cls='cool-yellow'; title='🟡 收缩仓位 · 只减不加';
-    sub='已触发收缩（'+yellow.join(' · ')+'）。今日不再开新仓或仅极小仓试错，等回撤修复、心态平复再动。连亏2笔是常态起点，不必恐慌，但须降仓自检、杜绝补仓。';
+    sub='已现回撤/首笔亏损。今日不再开新仓或仅极小仓试错，等回撤修复、心态平复再动。';
   } else {
     cls='cool-green'; title='🟢 正常 · 按计划执行';
     sub='未见亏损预警。仍须严守水温总开关：水温冷则不开新仓，宁错过不做逆势。';
@@ -2836,7 +2822,7 @@ function renderCooldown(){
   }
 }
 function bindCooldown(){
-  ['coolDay','coolStreak','coolMonth','coolSingle'].forEach(function(id){
+  ['coolDay','coolStreak','coolMonth'].forEach(function(id){
     var e=document.getElementById(id); if(e) e.addEventListener('input', renderCooldown);
   });
   renderCooldown();

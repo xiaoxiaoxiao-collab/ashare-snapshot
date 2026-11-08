@@ -77,6 +77,17 @@
   .ma20-result.m20-ok .m20-grade{color:var(--down)}
   .ma20-result.m20-mid .m20-grade{color:var(--side)}
   .ma20-result.m20-danger .m20-grade{color:var(--up)}
+  /* 破MA20近N日占比历史对比（迷你柱 + 较上次涨跌） */
+  .m20-hist{margin-top:10px;border-top:1px dashed var(--line);padding-top:9px}
+  .m20-hhead{font-size:11.5px;color:var(--sub);margin-bottom:7px}
+  .m20-hrow{display:flex;align-items:flex-end;gap:6px;margin:5px 0}
+  .m20-hlab{font-size:11px;color:var(--sub);width:44px;flex:0 0 44px;text-align:right;line-height:1.2}
+  .m20-hbars{display:flex;align-items:flex-end;gap:3px;flex:1;overflow-x:auto;padding-bottom:1px}
+  .m20-hc{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;min-width:18px}
+  .m20-hbar{width:13px;border-radius:3px 3px 0 0;transition:height .2s}
+  .m20-hv{font-size:9px;color:var(--sub);margin-top:2px;white-space:nowrap}
+  .m20-hdelta{font-size:11px;color:var(--sub);margin-top:7px}
+  .m20-hsub{opacity:.8}
   .m20-div{display:flex;flex-direction:column;gap:3px;margin-top:9px;padding:8px 9px;border-radius:7px;font-size:12px;line-height:1.55}
   .m20-div b{font-size:12.5px}
   .m20-div-c{background:rgba(21,196,106,.12);border:1px solid rgba(21,196,106,.45);color:#86efac}
@@ -3508,7 +3519,7 @@ function buildViews(){
   var vM=mkView('view-market'), vT=mkView('view-trend'), vB=mkView('view-box'), vD=mkView('view-disc'), vW=mkView('view-watch'), vS=mkView('view-struct'), vWk=mkView('view-weekly');
   mvTo('discBanner', vD);
   ['ticks','verdict','daototal','alert','pb','sent','breakout','ml','concept','dims','advice','trigs'].forEach(function(id){ mvTo(id, vM); });
-  mvTo('roles', vT); mvTo('trend', vT);
+  mvTo('roles', vT); mvTo('trend', vT); mvTo('ma20', vT);
   mvTo('box', vB); mvTo('boxMethod', vB); mvTo('btSel', vB); mvTo('boxtrade', vB);
   mvTo('defense', vD); mvTo('gate', vD); mvTo('mem', vD); mvTo('journal', vD);
   mvTo('coolPanel', vD);
@@ -3993,6 +4004,42 @@ function bindWeekly(){
 }
 
 /* ============ 破MA20占比（全市场容错率代理·板块级） ============ */
+// 近N日占比历史对比：每次扫描完成(非缓存)按本地日期记录双口径占比，卡片内渲染迷你柱供与今日比较
+var MA20_HIST_KEY='MA20_HISTORY', MA20_HIST_N=10, MA20_HIST_MAX=60;
+function ma20HistCls(v, isTrend){ return isTrend ? (v>=45?'m20-danger':(v>=25?'m20-mid':'m20-ok')) : (v>=55?'m20-danger':(v>=35?'m20-mid':'m20-ok')); }
+function ma20HistDate(){ var d=new Date(); return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2); }
+function ma20HistLoad(){ try{ var a=kvGet(MA20_HIST_KEY); return Array.isArray(a)?a:[]; }catch(e){ return []; } }
+function ma20HistRecord(r, tr){
+  try{
+    var a=ma20HistLoad(), key=ma20HistDate(), last=a[a.length-1];
+    if(last && last.date===key){ last.ratio=r; last.trendRatio=tr; }   // 同日扫描：覆盖，不重复记
+    else a.push({date:key, ratio:r, trendRatio:tr});
+    if(a.length>MA20_HIST_MAX) a=a.slice(-MA20_HIST_MAX);
+    kvSet(MA20_HIST_KEY, a);
+  }catch(e){}
+}
+function ma20HistHtml(r, tr){
+  var a=ma20HistLoad(), rec=a.slice(-MA20_HIST_N);
+  if(rec.length<2) return '';   // 至少需今日+上次才有比较意义
+  var maxH=40;
+  function bars(isTrend){
+    return rec.map(function(it){
+      var v=isTrend?it.trendRatio:it.ratio;
+      var cls=ma20HistCls(v,isTrend), isLast=(it===rec[rec.length-1]);
+      var col=cls==='m20-danger'?'var(--up)':(cls==='m20-mid'?'var(--side)':'var(--down)');
+      var h=Math.max(2, Math.round(v/100*maxH));
+      var bStyle='height:'+h+'px;background:'+col+(isLast?';box-shadow:0 0 0 2px var(--blue)':'')+';'+(isLast?'border-radius:3px 3px 2px 2px':'');
+      return '<div class="m20-hc"><div class="m20-hbar" style="'+bStyle+'"></div><div class="m20-hv">'+(isLast?'今':v.toFixed(0))+'</div></div>';
+    }).join('');
+  }
+  var prev=rec[rec.length-2];
+  function delta(d){ return (d>0?'▲':'▼')+Math.abs(d).toFixed(1)+'%'; }
+  var dt='<div class="m20-hdelta">较上次　① '+delta(r-prev.ratio)+'　② '+delta(tr-prev.trendRatio)+' <span class="m20-hsub">（占比↑=破位增多=环境变差）</span></div>';
+  return '<div class="m20-hist"><div class="m20-hhead">📈 近'+rec.length+'次扫描占比对比（右端蓝框=今日）</div>'
+    + '<div class="m20-hrow"><span class="m20-hlab">①全市场</span><div class="m20-hbars">'+bars(false)+'</div></div>'
+    + '<div class="m20-hrow"><span class="m20-hlab">②趋势股</span><div class="m20-hbars">'+bars(true)+'</div></div>'
+    + dt + '</div>';
+}
 function renderMa20Result(s, cached){
   var el=document.getElementById('ma20Result'); if(!el) return;
   // 口径①：全市场破MA20占比（大盘水温/环境）
@@ -4005,6 +4052,7 @@ function renderMa20Result(s, cached){
   if(tr>=45){ tg='🔴 危险'; tcls='m20-danger'; }
   else if(tr>=25){ tg='🟡 中性'; tcls='m20-mid'; }
   else { tg='🟢 健康'; tcls='m20-ok'; }
+  if(!cached) ma20HistRecord(r, tr);   // 须早于 ma20HistHtml：今日先入列再渲染，右端才正确标"今"
   // 背离研判：①全市场 vs ②趋势股 风险等级差（0健康/1中性/2危险）
   var lv1 = r>=55?2:(r>=35?1:0), lv2 = tr>=45?2:(tr>=25?1:0), diff = lv1-lv2;
   var dvTag, dvText, dvCls;
@@ -4024,7 +4072,8 @@ function renderMa20Result(s, cached){
     +'<div class="m20-bar2"><div class="m20-bar-fill '+tcls+'" style="width:'+Math.min(100,tr)+'%"></div></div>'
     +'<div class="m20-sub">'+(s.trendTotal?('多头排列趋势股 '+s.trendTotal+' 只 · 其中已破位 '+s.trendBelow+' 只'):'（无趋势股样本）')+'</div>'
     +'<div class="m20-adv">'+advice+'</div>'
-    +'<div class="m20-div '+dvCls+'"><b>'+dvTag+'</b><span>'+dvText+'</span></div>';
+    +'<div class="m20-div '+dvCls+'"><b>'+dvTag+'</b><span>'+dvText+'</span></div>'
+    + ma20HistHtml(r, tr);
   try{ kvSet('MA20_BREAK_V1', {ts:Date.now(), ratio:r, valid:s.valid, total:s.total, trendRatio:tr, trendTotal:s.trendTotal, trendBelow:s.trendBelow}); }catch(e){}
 }
 function initMa20Scan(){

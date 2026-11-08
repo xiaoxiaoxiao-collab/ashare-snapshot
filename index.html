@@ -69,6 +69,7 @@
   .m20-bar-fill.m20-mid{background:var(--side)}
   .m20-bar-fill.m20-danger{background:var(--up)}
   .m20-sub{font-size:11px;color:var(--sub);margin:2px 0 4px}
+  .m20-top.m20-trend{margin-top:11px;border-top:1px dashed var(--line);padding-top:9px}
   .m20-adv{font-size:12px;line-height:1.6;padding:7px 9px;border-radius:7px;border:1px solid var(--line)}
   .ma20-result.m20-ok .m20-adv{background:rgba(21,196,106,.10);border-color:rgba(21,196,106,.4);color:#86efac}
   .ma20-result.m20-mid .m20-adv{background:rgba(212,160,23,.10);border-color:rgba(212,160,23,.4);color:#fde68a}
@@ -503,12 +504,12 @@
   <div class="sec-t">🧭 结构性行情判定（指数水温 × 主线分化）</div>
   <div class="struct" id="struct">加载中…</div>
 
-  <div class="sec-t">📉 破MA20占比（全市场容错率代理 · 板块级）</div>
+  <div class="sec-t">📉 破MA20占比（双口径 · ①全市场容错率 ②趋势股破位率）</div>
   <div class="ma20" id="ma20">
     <div class="ma20-bar">
       <button id="ma20Scan" class="btn">🔍 扫描全市场</button>
       <button id="ma20Stop" class="btn" style="display:none">⏹ 停止</button>
-      <span id="ma20Status" class="ma20-status">点「扫描全市场」：逐只拉日K统计收盘&lt;MA20的比例（全市场约5000+只，可中途停止；进度过半即具代表性）</span>
+      <span id="ma20Status" class="ma20-status">点「扫描全市场」：逐只拉日K，同时统计①全市场收盘&lt;MA20占比（大盘水温）与②多头排列趋势股中破MA20占比（趋势股回踩容错率）。全市场约5000+只，可中途停止；进度过半即具代表性。</span>
     </div>
     <div class="ma20-track" id="ma20Track" style="display:none"><div class="ma20-fill" id="ma20Fill"></div></div>
     <div class="ma20-result" id="ma20Result">—</div>
@@ -1202,7 +1203,11 @@
     });
   }
 
-  // 破MA20占比（全市场容错率代理·板块级）：遍历全市场个股逐只拉日K算MA20，统计收盘<MA20的比例
+  // 破MA20占比（双口径：①全市场容错率代理 ②趋势股破位率）
+  // 遍历全市场个股逐只拉日K算MA20，统计「收盘<MA20」的全市场占比与趋势股占比。
+  // 趋势股定义（与 screenTrendStocks 同源）：MA5>MA10>MA20>MA60 多头排列 = 已形成的趋势结构。
+  //   注意：此处不要求价格站上MA20，否则集合内永远无破位股。趋势股破位率=其中收盘<MA20的比例，
+  //   直接反映「趋势股回踩后能否涨回来」的容错环境（均线仍多头但价已破20日线=回踩破位）。
   function scanMa20Break(opts) {
     opts = opts || {};
     var br = _ctx ? _ctx.br : null;
@@ -1218,19 +1223,33 @@
     // Fisher-Yates 洗牌：使进度条前半段即为全市场无偏抽样，早期占比估计即具代表性
     for (var i = list.length - 1; i > 0; i--) { var j = Math.floor(Math.random() * (i + 1)); var t = list[i]; list[i] = list[j]; list[j] = t; }
     var total = list.length, scanned = 0, valid = 0, below = 0;
+    var trendTotal = 0, trendBelow = 0;   // 趋势股（多头排列）数 / 其中破MA20数
     var onProg = opts.onProgress || function () {};
     function isStop() { return !!(opts.isStop && opts.isStop()); }
-    function snap() { return { total: total, scanned: scanned, valid: valid, below: below, ratio: valid ? below / valid * 100 : 0, stopped: isStop() }; }
+    function ma(a, n) { var s = 0; for (var k = a.length - n; k < a.length; k++) s += a[k]; return s / n; }
+    function snap() {
+      return {
+        total: total, scanned: scanned, valid: valid, below: below, ratio: valid ? below / valid * 100 : 0,
+        trendTotal: trendTotal, trendBelow: trendBelow, trendRatio: trendTotal ? trendBelow / trendTotal * 100 : 0,
+        stopped: isStop()
+      };
+    }
     return runPool(list, 8, function (y) {
       if (isStop()) return null;
-      return fetchKlinePeriod(y.symbol, 'day', 40).then(function (kl) {
+      return fetchKlinePeriod(y.symbol, 'day', 70).then(function (kl) {
         if (!kl || kl.length < 20) return null;
         var close = kl.map(function (r) { return r.close; });
         var n = 20, s = 0; for (var k = close.length - n; k < close.length; k++) s += close[k];
         var ma20 = s / n, c = close[close.length - 1];
-        return { below: c < ma20 };
+        // 趋势股判定（与 screenTrendStocks 同源）：MA5>MA10>MA20>MA60 多头排列即"已形成的趋势结构"
+        var m5 = ma(close, 5), m10 = ma(close, 10), m60 = ma(close, 60);
+        var isTrend = (m5 > m10 && m10 > ma20 && ma20 > m60);
+        return { below: c < ma20, isTrend: isTrend };
       }).catch(function () { return null; }).then(function (r) {
-        if (r) { valid++; if (r.below) below++; }
+        if (r) {
+          valid++; if (r.below) below++;
+          if (r.isTrend) { trendTotal++; if (r.below) trendBelow++; }
+        }
         scanned++;
         onProg(snap());
         return r;
@@ -3951,16 +3970,25 @@ function bindWeekly(){
 /* ============ 破MA20占比（全市场容错率代理·板块级） ============ */
 function renderMa20Result(s, cached){
   var el=document.getElementById('ma20Result'); if(!el) return;
+  // 口径①：全市场破MA20占比（大盘水温/环境）
   var r=s.ratio, grade, gcls, advice;
   if(r>=55){ grade='🔴 危险'; gcls='m20-danger'; advice='破位股占多数，容错率低、亏钱效应显著：多数个股已跌破MA20，回踩难涨回。收缩仓位/空仓，所有买点失效（见§10.7熔断）。'; }
   else if(r>=35){ grade='🟡 中性'; gcls='m20-mid'; advice='约半数个股破MA20，多空胶着、容错中性偏弱：只做真主线趋势股回踩（§10.12），不在箱体中上部追。'; }
   else { grade='🟢 健康'; gcls='m20-ok'; advice='多数个股站稳MA20，容错率高、赚钱效应基础在：主线趋势股按“回踩买、破线走”正常做多。'; }
+  // 口径②：趋势股破MA20占比（直接对应"趋势股回踩后能否涨回来"的容错率）
+  var tr=(s.trendRatio!=null?s.trendRatio:0), tg, tcls;
+  if(tr>=45){ tg='🔴 危险'; tcls='m20-danger'; }
+  else if(tr>=25){ tg='🟡 中性'; tcls='m20-mid'; }
+  else { tg='🟢 健康'; tcls='m20-ok'; }
   el.className='ma20-result '+gcls;
-  el.innerHTML='<div class="m20-top"><b>破MA20占比 '+r.toFixed(1)+'%</b><span class="m20-grade">'+grade+'</span></div>'
+  el.innerHTML='<div class="m20-top"><b>① 全市场破MA20占比 '+r.toFixed(1)+'%</b><span class="m20-grade">'+grade+'</span></div>'
     +'<div class="m20-bar2"><div class="m20-bar-fill '+gcls+'" style="width:'+Math.min(100,r)+'%"></div></div>'
     +'<div class="m20-sub">样本 '+s.valid+' / 全市场 '+(s.total||0)+(cached?'（缓存）':'（实时扫描）')+'</div>'
+    +'<div class="m20-top m20-trend"><b>② 趋势股破MA20占比 '+tr.toFixed(1)+'%</b><span class="m20-grade">'+tg+'</span></div>'
+    +'<div class="m20-bar2"><div class="m20-bar-fill '+tcls+'" style="width:'+Math.min(100,tr)+'%"></div></div>'
+    +'<div class="m20-sub">'+(s.trendTotal?('多头排列趋势股 '+s.trendTotal+' 只 · 其中已破位 '+s.trendBelow+' 只'):'（无趋势股样本）')+'</div>'
     +'<div class="m20-adv">'+advice+'</div>';
-  try{ kvSet('MA20_BREAK_V1', {ts:Date.now(), ratio:r, valid:s.valid, total:s.total}); }catch(e){}
+  try{ kvSet('MA20_BREAK_V1', {ts:Date.now(), ratio:r, valid:s.valid, total:s.total, trendRatio:tr, trendTotal:s.trendTotal, trendBelow:s.trendBelow}); }catch(e){}
 }
 function initMa20Scan(){
   var btn=document.getElementById('ma20Scan'); if(!btn) return;
@@ -3977,7 +4005,7 @@ function initMa20Scan(){
       onProgress:function(s){
         var pct=s.total?Math.round(s.scanned/s.total*100):0;
         var fill=document.getElementById('ma20Fill'); if(fill) fill.style.width=pct+'%';
-        document.getElementById('ma20Status').textContent='已扫 '+s.scanned+'/'+s.total+' · 有效 '+s.valid+' · 破位 '+s.below+' · 当前占比 '+s.ratio.toFixed(1)+'%';
+        document.getElementById('ma20Status').textContent='已扫 '+s.scanned+'/'+s.total+' · 有效 '+s.valid+' · 全市场破位 '+s.below+'('+s.ratio.toFixed(1)+'%)'+(s.trendTotal?(' · 趋势股破位 '+s.trendBelow+'/'+s.trendTotal+'('+s.trendRatio.toFixed(1)+'%)'):'');
         if(s.scanned>=s.total||s.stopped) renderMa20Result(s);
       },
       isStop:function(){ return stop; }

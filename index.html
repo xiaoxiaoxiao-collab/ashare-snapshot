@@ -365,6 +365,14 @@
   .box-method .bm-body b{color:var(--fg)}
   .box-method .bm-tip{color:var(--up);font-weight:600}
   .box-method .bm-warn{color:var(--down);font-weight:600}
+  /* 纪律模块「复盘」分组：默认折叠，点击展开 */
+  .grp-fold{margin:4px 0;border:1px solid #2a3646;border-radius:8px;background:#0f1620;overflow:hidden}
+  .grp-fold>summary{cursor:pointer;padding:9px 11px;font-weight:700;font-size:12.5px;color:var(--blue);list-style:none;user-select:none}
+  .grp-fold>summary::-webkit-details-marker{display:none}
+  .grp-fold>summary::before{content:'\25B8 ';font-size:10px}
+  .grp-fold[open]>summary::before{content:'\25BE ';font-size:10px}
+  .grp-fold[open]>summary{color:var(--fg);border-bottom:1px solid #2a3646}
+  .grp-fold .sec-t{margin-top:10px}
   .boxtrade .bt-mkt{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px}
   .boxtrade .bt-mkt .bt-card{flex:1;min-width:200px;border:1px solid #2a3646;border-radius:8px;padding:8px 10px;background:#11192a}
   .boxtrade .bt-mkt .bt-card.bot{border-color:var(--up);background:rgba(74,222,128,.08)}
@@ -557,7 +565,7 @@
   <div class="sec-t">情绪温度计（炸板率/晋级率/空间板 · 所有买点的总开关）</div>
   <div class="ml" id="sent">加载中…</div>
 
-  <div class="sec-t">三重共振打板策略（指数·板块·个股共振 → 出手环境评分）</div>
+  <div class="sec-t">🎲 打板情绪（可选参考 · 非主线战法 · 不与趋势/箱体框架并列）</div>
   <div class="ml" id="breakout">加载中…</div>
 
   <div class="sec-t">主线强度（涨停梯队 · 封板池口径）</div>
@@ -586,11 +594,14 @@
     <div class="ma20-result" id="ma20Result">—</div>
   </div>
 
+  <details class="grp-fold" id="grpReview">
+    <summary>📂 复盘记录（关注记忆 · 交易日志 · 低频 · 点击展开）</summary>
   <div class="sec-t">📖 我的关注记忆（本机浏览器 · 跨刷新/重开保留）</div>
   <div class="mem" id="mem">加载中…</div>
 
   <div class="sec-t">📝 我的交易日志（本机 · 决策→执行→结果，对抗情绪化）</div>
   <div class="journal" id="journal">加载中…</div>
+  </details>
 
   <div class="sec-t">五维仪表盘（红=涨 / 绿=跌 / 黄=震）</div>
   <div id="dims"></div>
@@ -3516,36 +3527,46 @@ function mvTo(id, view){
   view.appendChild(el);
 }
 function buildViews(){
-  var vM=mkView('view-market'), vT=mkView('view-trend'), vB=mkView('view-box'), vD=mkView('view-disc'), vW=mkView('view-watch'), vS=mkView('view-struct'), vWk=mkView('view-weekly');
+  var vM=mkView('view-market'), vML=mkView('view-mainline'), vT=mkView('view-trend'), vB=mkView('view-box'), vD=mkView('view-disc'), vW=mkView('view-watch'), vWk=mkView('view-weekly');
+  /* 纪律：① 常驻横幅 + 心法（道） */
   mvTo('discBanner', vD);
-  ['ticks','verdict','daototal','alert','pb','sent','breakout','ml','concept','dims','advice','trigs'].forEach(function(id){ mvTo(id, vM); });
-  mvTo('roles', vT); mvTo('trend', vT); mvTo('ma20', vT);
-  mvTo('box', vB); mvTo('boxMethod', vB); mvTo('btSel', vB); mvTo('boxtrade', vB);
-  mvTo('defense', vD); mvTo('gate', vD); mvTo('mem', vD); mvTo('journal', vD);
-  mvTo('coolPanel', vD);
-  var ofEl=document.getElementById('offense'); if(ofEl){ var op=ofEl.previousElementSibling; if(op&&op.classList&&op.classList.contains('sec-t')) vD.appendChild(op); vD.appendChild(ofEl); }
-  mvTo('struct', vS);
-  mvTo('weekly', vWk);
-  var riskEl=document.getElementById('risk'); if(riskEl){ var rp=riskEl.previousElementSibling; if(rp&&rp.classList&&rp.classList.contains('sec-t')) vD.appendChild(rp); vD.appendChild(riskEl); }
-  var chkEl=document.getElementById('chklist'); if(chkEl){ var cp=chkEl.previousElementSibling; if(cp&&cp.classList&&cp.classList.contains('sec-t')) vD.appendChild(cp); vD.appendChild(chkEl); }
   var pc=document.querySelector('.playcard'); if(pc){ var pp=pc.previousElementSibling; if(pp&&pp.classList&&pp.classList.contains('sec-t')) vD.appendChild(pp); vD.appendChild(pc); }
+  /* 大盘：研判总览（水温仓位 / 势道 / 五维 / 情绪·含打板可选参考 / 操作建议 / 转向） */
+  ['ticks','verdict','daototal','alert','pb','sent','breakout','dims','advice','trigs'].forEach(function(id){ mvTo(id, vM); });
+  /* 主线：合并散落的主线信息（结构性行情 / 主线强度 / 概念主线 / 题材角色） */
+  ['struct','ml','concept','roles'].forEach(function(id){ mvTo(id, vML); });
+  /* 趋势：趋势股作战（候选 + 破MA20双口径） */
+  mvTo('trend', vT); mvTo('ma20', vT);
+  /* 箱体：震荡作战（位置 + 方法论 + 多周期箱底低吸） */
+  mvTo('box', vB); mvTo('boxMethod', vB); mvTo('btSel', vB); mvTo('boxtrade', vB);
+  /* 纪律：② 机械化（清单 / 闸门 / 冷却） */
+  var chkEl=document.getElementById('chklist'); if(chkEl){ var cp=chkEl.previousElementSibling; if(cp&&cp.classList&&cp.classList.contains('sec-t')) vD.appendChild(cp); vD.appendChild(chkEl); }
+  mvTo('gate', vD);
+  mvTo('coolPanel', vD);
+  /* 纪律：③ 风控攻防（风控 / 进攻 / 防御） */
+  var riskEl=document.getElementById('risk'); if(riskEl){ var rp=riskEl.previousElementSibling; if(rp&&rp.classList&&rp.classList.contains('sec-t')) vD.appendChild(rp); vD.appendChild(riskEl); }
+  var ofEl=document.getElementById('offense'); if(ofEl){ var op=ofEl.previousElementSibling; if(op&&op.classList&&op.classList.contains('sec-t')) vD.appendChild(op); vD.appendChild(ofEl); }
+  mvTo('defense', vD);
+  /* 纪律：④ 复盘（关注记忆 / 交易日志 · 低频 · 默认折叠） */
+  var gr=document.getElementById('grpReview'); if(gr) vD.appendChild(gr);
+  mvTo('weekly', vWk);
   vW.innerHTML = watchUIHtml();
   var anchor=document.getElementById('dataAlarm');
   if(anchor && anchor.parentNode){
     anchor.parentNode.insertBefore(vM, anchor.nextSibling);
-    vM.parentNode.insertBefore(vT, vM.nextSibling);
+    vM.parentNode.insertBefore(vML, vM.nextSibling);
+    vML.parentNode.insertBefore(vT, vML.nextSibling);
     vT.parentNode.insertBefore(vB, vT.nextSibling);
     vB.parentNode.insertBefore(vD, vB.nextSibling);
     vD.parentNode.insertBefore(vW, vD.nextSibling);
-    vW.parentNode.insertBefore(vS, vW.nextSibling);
-    vS.parentNode.insertBefore(vWk, vS.nextSibling);
+    vW.parentNode.insertBefore(vWk, vW.nextSibling);
   }
   bindWatchUI();
 }
 var _scrollMem={};                       // 各视图离开时的滚动位置
 var _lastTap={t:0,v:''};                 // 双击检测
 function refreshView(v){                 // 双击底部图标 → 刷新该页数据
-  var name={market:'大盘',trend:'趋势',box:'箱体',disc:'纪律',watch:'自选',struct:'结构性',weekly:'周线'}[v]||v;
+  var name={market:'大盘',mainline:'主线',trend:'趋势',box:'箱体',disc:'纪律',watch:'自选',weekly:'周线'}[v]||v;
   if(v==='watch'){ _watchKlineCache={}; setStatus('⟳ 正在刷新「自选」…'); refreshWatch(); return; }
   if(v==='weekly'){ setStatus('⟳ 正在刷新「周线」…'); if(_wkLastList&&_wkLastList.length) wkRun(_wkLastList); else { setStatus('✓「周线」已刷新'); } return; }
   if(typeof load==='function'){
@@ -3556,7 +3577,7 @@ function refreshView(v){                 // 双击底部图标 → 刷新该页�
 function showView(v){
   if(v!==app().view) _scrollMem[app().view]=window.scrollY;   // 记住离开时的位置
   app().view=v;
-  ['market','trend','box','disc','watch','struct','weekly'].forEach(function(k){
+  ['market','mainline','trend','box','disc','watch','weekly'].forEach(function(k){
     var el=document.getElementById('view-'+k); if(el) el.classList.toggle('on', k===v);
   });
   Array.prototype.forEach.call(document.querySelectorAll('.botnav a'), function(a){ a.classList.toggle('on', a.getAttribute('data-v')===v); });
@@ -3568,7 +3589,7 @@ function showView(v){
 function syncLive(){ if(app().view==='market' && app().isLive) startLive(); else stopLive(); }
 function initNav(){
   var nav=document.createElement('nav'); nav.className='botnav';
-  var items=[['market','📊','大盘'],['trend','🚀','趋势'],['watch','⭐','自选'],['box','📐','箱体'],['disc','🛡️','纪律'],['struct','🧭','结构'],['weekly','🔍','周线']];
+  var items=[['market','📊','大盘'],['mainline','🧭','主线'],['trend','🚀','趋势'],['box','📐','箱体'],['disc','🛡️','纪律'],['watch','⭐','自选'],['weekly','🔍','周线']];
   nav.innerHTML=items.map(function(it){ return '<a data-v="'+it[0]+'" href="#'+it[0]+'"><span class="ic">'+it[1]+'</span><span class="tx">'+it[2]+'</span></a>'; }).join('');
   Array.prototype.forEach.call(nav.querySelectorAll('a'), function(a){
     a.onclick=function(e){
@@ -3580,9 +3601,9 @@ function initNav(){
     };
   });
   document.body.appendChild(nav);
-  window.addEventListener('hashchange', function(){ var v=(location.hash||'#market').replace('#',''); if(v===app().view) return; if(['market','trend','box','disc','watch','struct','weekly'].indexOf(v)>=0) showView(v); });
+  window.addEventListener('hashchange', function(){ var v=(location.hash||'#market').replace('#',''); if(v===app().view) return; if(['market','mainline','trend','box','disc','watch','weekly'].indexOf(v)>=0) showView(v); });
   var init=(location.hash||'#market').replace('#','');
-  if(['market','trend','box','disc','watch','struct','weekly'].indexOf(init)<0) init='market';
+  if(['market','mainline','trend','box','disc','watch','weekly'].indexOf(init)<0) init='market';
   showView(init);
 }
 

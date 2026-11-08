@@ -48,6 +48,9 @@
   .struct .struct-top.st-up .st-badge{background:rgba(255,77,79,.18);color:var(--up)}
   .struct .struct-top.st-side .st-badge{background:rgba(212,160,23,.18);color:var(--side)}
   .struct .struct-top.st-down .st-badge{background:rgba(21,196,106,.18);color:var(--down)}
+  .struct .row .eff-up{color:var(--up);font-weight:700}
+  .struct .row .eff-down{color:var(--down);font-weight:700}
+  .struct .row .eff-side{color:var(--side);font-weight:700}
   .struct .struct-advice{margin-top:8px;font-size:12.5px;line-height:1.6;color:var(--txt);background:#0f141b;border:1px solid var(--line);border-radius:8px;padding:8px 10px}
   .struct .struct-advice b{color:var(--blue)}
   .struct .struct-targets{margin-top:9px;border:1px dashed var(--blue);border-radius:8px;padding:8px 10px;background:rgba(59,130,246,.06)}
@@ -101,6 +104,10 @@
   .tcard .tag.t-off{color:var(--sub)}
   .tcard .tc-t{color:#cdd6e4;font-size:12px}
   .tcard .tc-t b{color:var(--txt)}
+  .tcard .tc-t.atr-lock{color:#b9c6db;border-left:3px solid var(--blue);padding-left:7px;margin-top:3px}
+  .tcard .tc-t.atr-lock b{color:var(--blue)}
+  .tcard .atr-lock .lock-broken{color:var(--down);font-weight:700}
+  .tcard .atr-lock .lock-ok{color:#7c8aa3;font-size:11px}
   .tcard .tc-p{color:var(--side);font-size:11.5px;margin-top:2px}
   .tcard .tc-p b{color:var(--up)}
   .tw-h{margin:8px 0 4px;padding:3px 8px;font-size:12px;font-weight:700;color:var(--up);background:rgba(231,76,60,.08);border-left:3px solid var(--up);border-radius:4px}
@@ -582,13 +589,14 @@
     [ ] 是否违反当前行情禁忌（震荡追涨 / 下跌抄底）？
   </div>
 
-  <div class="sec-t">🧊 亏损冷却自检（防"交易-亏损"恶性循环 · 手动记录）</div>
+  <div class="sec-t">🧊 亏损冷却自检（双触发收缩/停机 · 防"交易-亏损"恶性循环 · 手动记录）</div>
   <div class="cool" id="coolPanel">
-    <div class="cool-desc">工具不读取实盘账户。请按今日账户真实情况填写，系统给出<b>冷却等级</b>与硬指令。分仓参考阈值：<b>单日回撤≥3% 停手；月累计回撤≥8% 强制休整 3–5 日；连亏≥2 笔即收缩</b>。</div>
+    <div class="cool-desc">工具不读取实盘账户。请按今日账户真实情况填写，系统按<b>「单笔幅度 × 连亏笔数」双触发</b>给出<b>冷却等级</b>与硬指令（基于 2025 年 125 笔真实交割单回溯）。<br>阈值：🔴 单笔≤−8% 或 连亏≥3笔 或 单日回撤≥3% 或 月回撤≥8% → 强制停机；🟡 单笔≤−5% 或 连亏=2笔 或 单日回撤≥1.5% → 收缩。</div>
     <div class="cool-row">
       <label>今日账户回撤 %<input type="number" id="coolDay" step="0.1" min="0" placeholder="0"></label>
       <label>连续亏损笔数<input type="number" id="coolStreak" step="1" min="0" placeholder="0"></label>
       <label>本月累计回撤 %<input type="number" id="coolMonth" step="0.1" min="0" placeholder="0"></label>
+      <label>单笔最大亏损 %<input type="number" id="coolSingle" step="0.1" min="0" placeholder="0"></label>
     </div>
     <div class="cool-out" id="coolOut">填写后自动判定 →</div>
     <div class="cool-trap" id="coolTrap"></div>
@@ -1119,13 +1127,13 @@
         var drift = (close[close.length - 1] - close[0]) / Math.max(close[0], 1e-6) * 100;
         if (drift > cfg.ampMin * 1.2) return null;   // 窗口内累计涨幅超箱体幅度阈值→判为上行通道，排除
         // —— 箱底低吸操作意见：买点=箱底支撑、止损=破箱底-4%、止盈=箱顶、仓位≤30% ——
-        var buy1 = box.boxLow * 1.01;   // 箱底支撑附近
+        var buy1 = box.boxLow * 1.01;   // 箱底支撑附近(入场基准)
         var buy2 = box.boxLow * 0.97;   // 二次低吸/补仓
-        var stop = box.boxLow * 0.96;   // 破箱底 -4% 止损
-        var stopPct = (stop / cur - 1) * 100;
+        var stop = buy1 * 0.96;         // 破箱底 -4% 有效止损(相对买点价，杜绝与当前价基准错位)
+        var stopPct = (stop / buy1 - 1) * 100;
         var target = box.boxHigh * 0.98; // 箱顶附近止盈
         var FEE = 0.0016;  // A股单边往返综合成本≈0.16%（高频网格累计不可忽视）
-        var rrr = (target - cur - FEE * cur) / Math.max(cur - stop - FEE * cur, 1e-6);
+        var rrr = (target - buy1 - FEE * buy1) / Math.max(buy1 - stop - FEE * buy1, 1e-6);
         return {
           symbol: c.symbol, name: c.name, price: cur, pct: c.pct, amp: box.amp, pos: box.pos,
           boxLow: box.boxLow, boxHigh: box.boxHigh, zone: box.zone, trn: c.trn,
@@ -1421,14 +1429,32 @@
         // 分级回踩买点：强趋势回踩MA10即买(破MA20离场)、普通趋势回踩MA20买(破MA60离场)
         var buyMA = strong ? ma10 : ma20;
         var buyMAName = strong ? 'MA10' : 'MA20';
-        var buy1 = buyMA, buy2 = strong ? ma20 : ma60;
-        var stopT = strong ? ma20 : Math.max(ma60, box.boxLow);
-        var maxLoss = cc * 0.93;                               // 趋势/低吸 -7% 硬砍上限
-        var stop = stopT > maxLoss ? maxLoss : stopT;
-        var stopPct = (stop / cc - 1) * 100;
-        var target = box.boxHigh > cc ? box.boxHigh : cc * 1.15;
+        var buy1 = buyMA, buy2 = strong ? ma20 : ma60;   // 入场基准=买点价(回踩MA)；止损/盈亏比统一以buy1计
+        // 有效止损按【买点价 −7% 硬砍】(手册§风控：趋势/低吸 -7% 止损、破位无条件走)；
+        // 不再用 MA20/MA60 作止损分母(它在买点上方→分母为负被钳成荒谬大值，即"盈亏比既正又负"的bug)
+        var stop = buy1 * 0.93;
+        var stopPct = (stop / buy1 - 1) * 100;           // 相对买点价的止损%
+        var target = box.boxHigh > buy1 ? box.boxHigh : buy1 * 1.15;
         var FEE = 0.0016;  // A股单边往返综合成本(佣金+印花税+过户费)≈0.16%
-        var rrr = (target - cc - FEE * cc) / Math.max(cc - stop - FEE * cc, 1e-6);   // 风险收益比(已计入交易成本)
+        // 盈亏比：入场=买点价 buy1；分母=有效止损空间(恒正，无需钳制)；结构矛盾(分母≤0)如实记负
+        var denom = buy1 - stop - FEE * buy1;
+        var rrr = denom > 0 ? (target - buy1 - FEE * buy1) / denom : -1;
+        // —— ATR 跟踪锁利润（吊灯止损 Chandelier Exit）——
+        // ATR(14) 用与 adxCalc 一致的真实波幅 Wilder 平滑；peakClose 取近30日最高收盘
+        // 跟踪止损价 = 近期高收 − 3×ATR（只上不下，随新高 ratchet 上移，锁住利润、过滤正常波动噪声）
+        function _atrArr(h, l, c, n) {
+          var len = c.length, tr = new Array(len);
+          tr[0] = h[0] - l[0];
+          for (var i = 1; i < len; i++) { var pc = c[i - 1]; tr[i] = Math.max(h[i] - l[i], Math.abs(h[i] - pc), Math.abs(l[i] - pc)); }
+          return wilderArr(tr, n);
+        }
+        var _atrV = _atrArr(high, low, close, 14);
+        var atr = _atrV[_atrV.length - 1];
+        var _win = close.slice(-30);
+        var peakClose = Math.max.apply(null, _win);
+        var trailStop = peakClose - 3 * atr;                 // 吊灯止损价（波动率自适应）
+        var trailPct = (trailStop / cc - 1) * 100;           // 锁利线相对当前价%
+        var trailBroken = trailStop > cc;                    // 现价已跌破锁利线（该止盈离场）
         var devBuy = (cc / buyMA - 1) * 100;                  // 价对买点均线的乖离
         var aboveBuy = cc > buyMA;
         var atBuy = devBuy <= 3;   // 已回踩至买点均线附近(含微破)
@@ -1469,6 +1495,7 @@
           boxPos: box.pos, boxZone: box.zone, boxLow: box.boxLow, boxHigh: box.boxHigh,
           vmaRatio: vmaRatio,
           buy1: buy1, buy2: buy2, stop: stop, stopPct: stopPct, target: target, rrr: rrr,
+          atr: atr, peakClose: peakClose, trailStop: trailStop, trailPct: trailPct, trailBroken: trailBroken,
           posPct: posPct, posTxt: posTxt, status: status, atBuy: atBuy,
           mlPB: _mlPB, mlShrink: _shrink, mlReversal: _reversal, mlTouch: _touch, mlMa10Up: _ma10Up, mlDevMA10: +_devMA10.toFixed(1)
         };
@@ -1829,7 +1856,7 @@ function ctxOverlay(s, regime, conf){
     if(strongBuy){ act='低吸/加仓'; pos = '≤30%'; posTxt = s.strong ? '顺势做多，回踩MA10即黄金买点，单票≤30%分两笔，破MA20离场' : '回踩MA20低吸，顺势轻仓试错，破MA60离场'; }
     else if(s.strong && s.status==='trend'){ act='持有/等回踩'; pos='持有'; posTxt = s.strong ? '强趋势运行于MA10之上，持有不追高，破MA20减仓、破MA60清仓' : '站于MA20之上，持有不追，破MA60清仓'; }
     else { act='观望'; pos='≤20%'; posTxt = s.strong ? '强趋势偏离过远不追高，等回踩MA10/MA20' : '趋势强度不足(ADX<25)或回调未到买点，仅轻仓试错，强趋势等MA10、普通趋势等MA20'; }
-    tip='顺势不猜顶：强趋势回踩MA10即买(破MA20离场)、普通趋势回踩MA20买(破MA60离场)；不追乖离>15%的票；顶部信号(≥2项)共振时减仓。回踩买点可盘中低吸，加仓宜14:30后尾盘确认(仅上涨/偏多日；单边下跌日严禁尾盘加仓——T+1次日才能卖，接飞刀风险最大)。⚠️ A股T+1：当日新买入仓当日不可卖，止损单只覆盖底仓；个股跌停封死时−5%/-7%止损单无法成交，须以"破位次日竞价离场"为兜底';
+    tip='顺势不猜顶：强趋势回踩MA10即买(破MA20离场)、普通趋势回踩MA20买(破MA60离场)；不追乖离>15%的票；顶部信号(≥2项)共振时减仓。盈利后改用「ATR跟踪锁利线」(近期高收−3×ATR，波动率自适应)上移止损——高乖离股破MA20可达−38%不具执行性，用ATR锁利线既能不被洗出、又不坐过山车。回踩买点可盘中低吸，加仓宜14:30后尾盘确认(仅上涨/偏多日；单边下跌日严禁尾盘加仓——T+1次日才能卖，接飞刀风险最大)。⚠️ A股T+1：当日新买入仓当日不可卖，止损单只覆盖底仓；个股跌停封死时−5%/-7%止损单无法成交，须以"破位次日竞价离场"为兜底';
     timing='回踩买点可盘中低吸；重仓加仓宜14:30后尾盘确认，不竞价追高';
   } else if(regime==='震荡'){
     if(s.status==='pullback'&&s.atBuy){ act='箱底低吸'; pos='≤30%'; posTxt='震荡市只做回踩下轨/箱底低吸，不追突破'; }
@@ -1873,7 +1900,7 @@ function renderTrend(t, regime, conf, d){
         ? '<span class="tag" style="color:var(--up);border-color:var(--up)">总龙头</span>'
         : '<span class="tag" style="color:var(--blue);border-color:var(--blue)">中军</span>';
       const roleBlock = ra ? `<div class="tc-role">🎯 <b>角色联动（单边上涨·${roleName}）</b>：买点 ${ra.buy} ｜ 仓位 ${ra.pos} ｜ 止损 ${ra.stop} ｜ 离场 ${ra.exit}</div>` : '';
-      const stopPrice = s.price * (1 + o.stopPct/100);   // 止损价随环境收紧同步重算
+      const stopPrice = s.buy1 * (1 + o.stopPct/100);   // 止损价=买点基准×止损%(随regime收紧)；入场/止损/盈亏比统一以买点价计，杜绝基准错位
       const buyHint = (s.status==='pullback'&&s.atBuy) ? ' · <b style="color:var(--up)">已回踩至'+s.buyMAName+'买点附近</b>'
                     : ((s.status==='pullback') ? ' · 回调中(等'+s.buyMAName+')' : '');
       const actCls = o.act.indexOf('空仓')>=0 ? 't-off' : (o.act.indexOf('减仓')>=0||o.act.indexOf('观望')>=0) ? 't-warn' : 't-on';
@@ -1885,10 +1912,12 @@ function renderTrend(t, regime, conf, d){
           <span class="tag ${s.strong?'t-on':'t-off'}">${s.trendStr} · ADX${s.adx.toFixed(0)} +DI${s.pdi.toFixed(0)}</span>
           <span class="tag">回踩位${s.buyMAName}乖离 ${s.devBuy>=0?'+':''}${s.devBuy.toFixed(1)}%</span>
           <span class="tag">量比${s.vmaRatio.toFixed(2)}</span>
+          <span class="tag">ATR(14)¥${s.atr.toFixed(2)}</span>
           <span class="tag">箱体${s.boxZone}(${(s.boxPos*100).toFixed(0)}%)</span>
           ${s.rrr<1.5?'<span class="tag t-off">⚠️ 盈亏比&lt;1.5 慎动手</span>':''}
         </div>
-        <div class="tc-t">买点 回踩<b>¥${s.buy1.toFixed(2)}</b>(${s.buyMAName}) / 支撑<b>¥${s.buy2.toFixed(2)}</b>(${s.strong?'MA20':'MA60'}) · 止损<b>¥${stopPrice.toFixed(2)}</b>(${o.stopPct.toFixed(1)}%) · 目标<b>¥${s.target.toFixed(2)}</b> · 盈亏比<b class="${s.rrr<1.5?'rrr-bad':''}">${s.rrr.toFixed(1)}</b></div>
+        <div class="tc-t">买点 回踩<b>¥${s.buy1.toFixed(2)}</b>(${s.buyMAName}) / 支撑<b>¥${s.buy2.toFixed(2)}</b>(${s.strong?'MA20':'MA60'}·破位离场) · 有效止损<b>¥${stopPrice.toFixed(2)}</b>(${o.stopPct.toFixed(1)}%) · 目标<b>¥${s.target.toFixed(2)}</b> · 盈亏比<b class="${s.rrr<1.5?'rrr-bad':''}">${s.rrr.toFixed(1)}</b></div>
+        <div class="tc-t atr-lock">🔒 ATR跟踪锁利线 <b>¥${s.trailStop.toFixed(2)}</b>(${s.trailPct.toFixed(1)}% · 近期高收¥${s.peakClose.toFixed(2)}−3×ATR¥${s.atr.toFixed(2)})${s.trailBroken?'<span class="lock-broken"> ⚠️ 现价已破锁利线，应止盈离场</span>':'<span class="lock-ok"> 只上不下，盈利后随新高上移</span>'}</div>
         ${(s.mlPB && regime==='单边上涨') ? '<div class="tc-mlp">✅ <b>§10.12 主线回踩买点</b>：缩量回踩 MA10(乖离'+s.mlDevMA10.toFixed(1)+'%) + 反转确认 · 破MA20硬离场 · 不追高、不补仓</div>' : ''}
         <div class="tc-act"><span class="tag ${actCls}">${o.act}</span> 仓位 <b>${o.pos}</b> · ${o.posTxt}${buyHint}</div>
         <div class="tc-tip">🛡️ ${o.tip}<br>⏱️ 时机：${o.timing}</div>
@@ -2798,14 +2827,27 @@ function renderCooldown(){
   var d=parseFloat(document.getElementById('coolDay').value)||0;
   var s=parseInt(document.getElementById('coolStreak').value)||0;
   var m=parseFloat(document.getElementById('coolMonth').value)||0;
+  var sp=parseFloat(document.getElementById('coolSingle').value)||0; // 单笔最大亏损幅度 % (>=0)
   var cls,title,sub;
-  if(s>=2 || d>=3 || m>=8){
+  var red=[], yellow=[];
+  // 🔴 强制停机（不可商量红线）
+  if(sp>=8) red.push('单笔亏损≥8%（清掉该标的+全局冷却1天）');
+  if(s>=3) red.push('连续亏损≥3笔');
+  if(d>=3) red.push('单日回撤≥3%');
+  if(m>=8) red.push('月累计回撤≥8%');
+  // 🟡 收缩（黄区：仍可在场内，只减不加）
+  if(sp>=5) yellow.push('单笔亏损≥5%（立即减半仓+当日停开新仓）');
+  if(s===2) yellow.push('连续亏损2笔（降仓、不开新仓、进入自检）');
+  if(s>=2 && m>0.5) yellow.push('月内已转负+≥2连亏（当月转防守）');
+  if(d>=1.5) yellow.push('单日回撤1.5%–3%');
+  if(s>=1) yellow.push('出现首笔亏损');
+  if(red.length){
     cls='cool-red'; title='🔴 强制停机 · 关机冷却';
-    var why=[]; if(s>=2) why.push('连续亏损≥2笔'); if(d>=3) why.push('单日回撤≥3%'); if(m>=8) why.push('月累计回撤≥8%');
-    sub='已触发熔断（'+why.join(' · ')+'）。<b>立即停止开新仓</b>，关闭交易软件，休息 3–5 个交易日，复盘情绪与体系后再回。坏市场里的挣扎，平手已是满分。';
-  } else if(d>=1.5 || s>=1){
+    sub='已触发熔断（'+red.join(' · ')+'）。<b>立即停止开新仓、关闭交易软件</b>，休息 1–2 个交易日（月回撤触线则 3–5 日），复盘情绪与体系后再回。坏市场里的挣扎，平手已是满分。';
+    if(sp>=8) sub+='单笔已≤−8%：先清掉该标的，再进入冷却。';
+  } else if(yellow.length){
     cls='cool-yellow'; title='🟡 收缩仓位 · 只减不加';
-    sub='已现回撤/首笔亏损。今日不再开新仓或仅极小仓试错，等回撤修复、心态平复再动。';
+    sub='已触发收缩（'+yellow.join(' · ')+'）。今日不再开新仓或仅极小仓试错，等回撤修复、心态平复再动。连亏2笔是常态起点，不必恐慌，但须降仓自检、杜绝补仓。';
   } else {
     cls='cool-green'; title='🟢 正常 · 按计划执行';
     sub='未见亏损预警。仍须严守水温总开关：水温冷则不开新仓，宁错过不做逆势。';
@@ -2822,7 +2864,7 @@ function renderCooldown(){
   }
 }
 function bindCooldown(){
-  ['coolDay','coolStreak','coolMonth'].forEach(function(id){
+  ['coolDay','coolStreak','coolMonth','coolSingle'].forEach(function(id){
     var e=document.getElementById(id); if(e) e.addEventListener('input', renderCooldown);
   });
   renderCooldown();
@@ -2901,6 +2943,22 @@ function renderStructural(d, cs){
           : stype==='指数虚涨' ? 'st-side'
           : stype==='逆势主线' ? 'st-down'
           : stype==='无主线震荡' ? 'st-side' : 'st-down';
+  // 赚钱/亏钱效应（§6.1.1 情绪温度计实战落地）：以"结构分型 + 情绪温度"推导客观结论
+  var offenseType=(stype==='共振普涨'||stype==='结构性行情'||stype==='逆势主线');
+  var effect, effectKey, effectTxt;
+  if(temp==='退潮' || stype==='指数弱势'){
+    effect='亏钱效应'; effectKey='down';
+    effectTxt='容错率低：买对易被埋、买错即大面。收缩/空仓，所有买点失效（见§10.7熔断）。';
+  } else if(offenseType && (temp==='发酵'||temp==='高潮')){
+    effect='赚钱效应'; effectKey='up';
+    effectTxt='容错率高：回踩有溢价、止损跑得掉。启用「§10.12 主线回踩买点」，按进攻态执行。';
+  } else if(stype==='指数虚涨' || stype==='无主线震荡'){
+    effect='结构分化(弱)'; effectKey='side';
+    effectTxt='指数与个股背离或真震荡，容错中性偏弱：只做真主线，不强行开仓。';
+  } else {
+    effect='混沌'; effectKey='side';
+    effectTxt='信号未明朗，等开盘后梯队/晋级率确认再定。';
+  }
   var h='';
   h+='<div class="struct-top '+cls+'"><span class="st-badge">'+stype+'</span><span class="st-action">'+action+'</span></div>';
   h+='<div class="row"><span class="lb">结构强度分</span><span><b>'+score+'</b>/100</span></div>';
@@ -2908,6 +2966,7 @@ function renderStructural(d, cs){
   h+='<div class="row"><span class="lb">主线断层</span><span>'+(mlOk?'✅ 真主线成立':'— 未达门槛')+' 龙头行业'+s0Zt+'家 · 断层'+depth.toFixed(1)+'x · 涨停'+ztCount+'家</span></div>';
   h+='<div class="row"><span class="lb">概念趋势集群</span><span>'+(trendCount>0?('🔥 '+trendCount+'个概念处“趋势”级（成分股均多+20日中位+'+trendTop.toFixed(1)+'%）'):'— 无趋势级概念')+'</span></div>';
   h+='<div class="row"><span class="lb">情绪温度</span><span>'+temp+'</span></div>';
+  h+='<div class="row"><span class="lb">赚钱/亏钱效应</span><span class="eff-'+effectKey+'"><b>'+effect+'</b></span> '+effectTxt+'</div>';
   // 结构性机会的"标的"提示：当存在主线时，直接给出板块/龙头/中军线索，形成"机会+标的+建议"一站式
   if((stype==='结构性行情'||stype==='共振普涨'||stype==='逆势主线') && (mlOk || s0.sector)){
     h+='<div class="struct-targets">';

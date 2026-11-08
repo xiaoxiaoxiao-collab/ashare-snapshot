@@ -639,9 +639,6 @@
   </div>
   <div class="boxtrade" id="boxtrade">加载中…</div>
 
-  <div class="sec-t">操作建议</div>
-  <div class="advice" id="advice"><div class="t" id="adv-t">—</div><div id="adv-b">—</div></div>
-
   <div class="sec-t">行情转向监测（信号触发即提醒）</div>
   <div id="trigs"></div>
 
@@ -2668,6 +2665,8 @@ function renderPlaybook(d){
     const br=d.sentiment.bombRate;
     p+=row('警示', `<span style="color:var(--down)">退潮（炸板率${br!=null?br.toFixed(0)+'%':'—'}>40%），所有买点失效</span>`);
   }
+  // 心法（持仓纪律 · 由「操作建议」合并而来）：移动止盈/网格定投/不杠杆等维度，行情操作台其余行未覆盖
+  if(d.advice) p+=row('心法', d.advice);
   document.getElementById('pb').innerHTML=p;
 }
 
@@ -3212,10 +3211,6 @@ function render(d){
   renderSentiment(d.premarket?{pre:true}:d.sentiment);
   renderBox(d.box);
   renderTrend(d.premarket?{note:'盘前，趋势股候选待开盘后更新'}:{loading:true}, d.regime, d.conf, d);
-  document.getElementById('adv-t').textContent=d.regime+' · 建议仓位 '+d.position;
-  // 操作建议：一个句子一行
-  const advLines=String(d.advice||'').split(/[；;]/).map(s=>s.replace(/[。.]$/,'').trim()).filter(Boolean);
-  document.getElementById('adv-b').innerHTML=advLines.map(s=>'<div class="al">'+s+'。</div>').join('');
   // 行情转向监测（全向信号 + 触发提醒）
   const wd=d.watch||d.triggers||[];
   const upOk=wd.filter(w=>w.bias==='up'&&w.ok).length;
@@ -3437,9 +3432,6 @@ function renderLive(d){
     }
     document.getElementById('dims').innerHTML=dh;
     renderAlert(d); renderPlaybook(d); renderBreakout(d); renderBox(d.box);
-    document.getElementById('adv-t').textContent=d.regime+' · 建议仓位 '+d.position;
-    const advLines=String(d.advice||'').split(/[；;]/).map(s=>s.replace(/[。.]$/,'').trim()).filter(Boolean);
-    document.getElementById('adv-b').innerHTML=advLines.map(s=>'<div class="al">'+s+'。</div>').join('');
     const wd=d.watch||d.triggers||[];
     const upOk=wd.filter(w=>w.bias==='up'&&w.ok).length;
     const downOk=wd.filter(w=>w.bias==='down'&&w.ok).length;
@@ -3510,10 +3502,8 @@ async function fallbackToSnap(){
   setLiveBadge('snapfail');           // 保持 timerA 探测，实时恢复即自动切回 LIVE
 }
 
-/* ============ 视图切换 + 底部导航 + 自选股 + PWA（新增模块） ============ */
+/* ============ 视图切换 + 底部导航 + PWA ============ */
 window.__app = window.__app || { view:'market', isLive:false };
-var WATCH_KEY='ASH_WATCH';
-var _watchKlineCache={};
 var ENG=window.AshareEngine||{};   // 引擎在闭包内，只能通过导出的 API 调用
 function sma(a,n){ if(!a||a.length<n) return null; var s=0; for(var i=a.length-n;i<a.length;i++) s+=a[i]; return s/n; }
 function app(){ if(!window.__app) window.__app={view:'market',isLive:false}; return window.__app; }
@@ -3527,12 +3517,12 @@ function mvTo(id, view){
   view.appendChild(el);
 }
 function buildViews(){
-  var vM=mkView('view-market'), vML=mkView('view-mainline'), vT=mkView('view-trend'), vB=mkView('view-box'), vD=mkView('view-disc'), vW=mkView('view-watch'), vWk=mkView('view-weekly');
+  var vM=mkView('view-market'), vML=mkView('view-mainline'), vT=mkView('view-trend'), vB=mkView('view-box'), vD=mkView('view-disc'), vWk=mkView('view-weekly');
   /* 纪律：① 常驻横幅 + 心法（道） */
   mvTo('discBanner', vD);
   var pc=document.querySelector('.playcard'); if(pc){ var pp=pc.previousElementSibling; if(pp&&pp.classList&&pp.classList.contains('sec-t')) vD.appendChild(pp); vD.appendChild(pc); }
   /* 大盘：研判总览（水温仓位 / 势道 / 五维 / 情绪·含打板可选参考 / 操作建议 / 转向） */
-  ['ticks','verdict','daototal','alert','pb','sent','breakout','dims','advice','trigs'].forEach(function(id){ mvTo(id, vM); });
+  ['ticks','verdict','daototal','alert','pb','sent','breakout','dims','trigs'].forEach(function(id){ mvTo(id, vM); });
   /* 主线：合并散落的主线信息（结构性行情 / 主线强度 / 概念主线 / 题材角色） */
   ['struct','ml','concept','roles'].forEach(function(id){ mvTo(id, vML); });
   /* 趋势：趋势股作战（候选 + 破MA20双口径） */
@@ -3550,7 +3540,6 @@ function buildViews(){
   /* 纪律：④ 复盘（关注记忆 / 交易日志 · 低频 · 默认折叠） */
   var gr=document.getElementById('grpReview'); if(gr) vD.appendChild(gr);
   mvTo('weekly', vWk);
-  vW.innerHTML = watchUIHtml();
   var anchor=document.getElementById('dataAlarm');
   if(anchor && anchor.parentNode){
     anchor.parentNode.insertBefore(vM, anchor.nextSibling);
@@ -3558,16 +3547,13 @@ function buildViews(){
     vML.parentNode.insertBefore(vT, vML.nextSibling);
     vT.parentNode.insertBefore(vB, vT.nextSibling);
     vB.parentNode.insertBefore(vD, vB.nextSibling);
-    vD.parentNode.insertBefore(vW, vD.nextSibling);
-    vW.parentNode.insertBefore(vWk, vW.nextSibling);
+    vD.parentNode.insertBefore(vWk, vD.nextSibling);
   }
-  bindWatchUI();
 }
 var _scrollMem={};                       // 各视图离开时的滚动位置
 var _lastTap={t:0,v:''};                 // 双击检测
 function refreshView(v){                 // 双击底部图标 → 刷新该页数据
-  var name={market:'大盘',mainline:'主线',trend:'趋势',box:'箱体',disc:'纪律',watch:'自选',weekly:'周线'}[v]||v;
-  if(v==='watch'){ _watchKlineCache={}; setStatus('⟳ 正在刷新「自选」…'); refreshWatch(); return; }
+  var name={market:'大盘',mainline:'主线',trend:'趋势',box:'箱体',disc:'纪律',weekly:'周线'}[v]||v;
   if(v==='weekly'){ setStatus('⟳ 正在刷新「周线」…'); if(_wkLastList&&_wkLastList.length) wkRun(_wkLastList); else { setStatus('✓「周线」已刷新'); } return; }
   if(typeof load==='function'){
     setStatus('⟳ 正在刷新「'+name+'」…');
@@ -3577,19 +3563,18 @@ function refreshView(v){                 // 双击底部图标 → 刷新该页�
 function showView(v){
   if(v!==app().view) _scrollMem[app().view]=window.scrollY;   // 记住离开时的位置
   app().view=v;
-  ['market','mainline','trend','box','disc','watch','weekly'].forEach(function(k){
+  ['market','mainline','trend','box','disc','weekly'].forEach(function(k){
     var el=document.getElementById('view-'+k); if(el) el.classList.toggle('on', k===v);
   });
   Array.prototype.forEach.call(document.querySelectorAll('.botnav a'), function(a){ a.classList.toggle('on', a.getAttribute('data-v')===v); });
   if(location.hash!=='#'+v) location.hash='#'+v;
   syncLive();
-  if(v==='watch'){ var last=window.__watchRenderedAt||0; if(Date.now()-last>120000) refreshWatch(); }  // 2分钟内切回不重拉，保留原状态
   requestAnimationFrame(function(){ requestAnimationFrame(function(){ window.scrollTo(0,_scrollMem[v]||0); }); });  // 回到离开时位置
 }
 function syncLive(){ if(app().view==='market' && app().isLive) startLive(); else stopLive(); }
 function initNav(){
   var nav=document.createElement('nav'); nav.className='botnav';
-  var items=[['market','📊','大盘'],['mainline','🧭','主线'],['trend','🚀','趋势'],['box','📐','箱体'],['disc','🛡️','纪律'],['watch','⭐','自选'],['weekly','🔍','周线']];
+  var items=[['market','📊','大盘'],['mainline','🧭','主线'],['trend','🚀','趋势'],['box','📐','箱体'],['disc','🛡️','纪律'],['weekly','🔍','周线']];
   nav.innerHTML=items.map(function(it){ return '<a data-v="'+it[0]+'" href="#'+it[0]+'"><span class="ic">'+it[1]+'</span><span class="tx">'+it[2]+'</span></a>'; }).join('');
   Array.prototype.forEach.call(nav.querySelectorAll('a'), function(a){
     a.onclick=function(e){
@@ -3601,224 +3586,12 @@ function initNav(){
     };
   });
   document.body.appendChild(nav);
-  window.addEventListener('hashchange', function(){ var v=(location.hash||'#market').replace('#',''); if(v===app().view) return; if(['market','mainline','trend','box','disc','watch','weekly'].indexOf(v)>=0) showView(v); });
+  window.addEventListener('hashchange', function(){ var v=(location.hash||'#market').replace('#',''); if(v===app().view) return; if(['market','mainline','trend','box','disc','weekly'].indexOf(v)>=0) showView(v); });
   var init=(location.hash||'#market').replace('#','');
-  if(['market','mainline','trend','box','disc','watch','weekly'].indexOf(init)<0) init='market';
+  if(['market','mainline','trend','box','disc','weekly'].indexOf(init)<0) init='market';
   showView(init);
 }
 
-/* —— 自选股：添加 / 持久化 / 自动分析 / 提醒 —— */
-function watchUIHtml(){
-  return '<div class="sec-t">⭐ 我的自选股（自动跟踪大盘+个股，关键价位提醒） <span id="watchSync" class="w-sync">…</span></div>'
-    + '<div class="watch-form">'
-    + '<div class="wf-row"><input id="wf-code" placeholder="代码 如 688137" inputmode="numeric"><select id="wf-type"><option value="hold">已买入</option><option value="watch">仅观察</option></select></div>'
-    + '<div class="wf-row"><input id="wf-buy" placeholder="买入价(持有填)" type="number" step="0.01"><input id="wf-pos" placeholder="仓位%" type="number" step="1"><input id="wf-sl" placeholder="止损价" type="number" step="0.01"><input id="wf-tp" placeholder="止盈价" type="number" step="0.01"></div>'
-    + '<div class="wf-row"><textarea id="wf-reason" placeholder="买入理由 / 观察逻辑（选填）"></textarea></div>'
-    + '<div class="wf-row"><button id="wf-add" type="button">＋ 添加自选</button><button id="wf-notify" type="button" style="background:#222b36">🔔 开启提醒</button></div>'
-    + '<div style="font-size:11px;color:var(--sub);margin-top:4px;line-height:1.5">提示：纯前端工具，提醒在「页面打开期间」实时生效；关闭页面无法推送（需后端服务器，静态托管不支持）。</div>'
-    + '</div>'
-    + '<div id="wf-summary"></div>'
-    + '<div id="wf-list"></div>';
-}
-function bindWatchUI(){
-  var add=document.getElementById('wf-add'); if(add) add.onclick=function(){ addWatch(); };
-  var nb=document.getElementById('wf-notify'); if(nb) nb.onclick=function(){
-    if(!('Notification' in window)){ alert('当前浏览器不支持桌面通知'); return; }
-    Notification.requestPermission().then(function(p){ nb.textContent=(p==='granted')?'🔔 提醒已开':'🔔 开启提醒'; if(p!=='granted') alert('已拒绝通知权限，提醒仅页面内显示'); });
-  };
-}
-function normCode(input){
-  if(!input) return null;
-  var s=String(input).trim().toUpperCase().replace(/[^0-9A-Z]/g,'');
-  if(/^(SH|SZ|BJ)/.test(s)){ return s.slice(0,2).toLowerCase()+s.slice(2); }
-  if(/^\d{6}$/.test(s)){
-    var f=s.charAt(0);
-    s=(f==='6'||f==='8')?'sh'+s:(f==='0'||f==='3')?'sz'+s:'sh'+s;
-  } else return null;
-  return s;
-}
-function watchLoad(){ try{ return kvGet(WATCH_KEY)||[]; }catch(e){ return []; } }
-function watchSave(arr){ try{ kvSet(WATCH_KEY, arr); }catch(e){ alert('存储不可用，自选股无法保存：'+(e.message||e)); } }
-function addWatch(){
-  var code=normCode(document.getElementById('wf-code').value);
-  if(!code){ alert('请输入6位股票代码，如 688137'); return; }
-  var type=document.getElementById('wf-type').value;
-  var buy=parseFloat(document.getElementById('wf-buy').value)||null;
-  var pos=parseFloat(document.getElementById('wf-pos').value)||null;
-  var sl=parseFloat(document.getElementById('wf-sl').value)||null;
-  var tp=parseFloat(document.getElementById('wf-tp').value)||null;
-  var reason=document.getElementById('wf-reason').value.trim();
-  if(type==='hold' && buy==null){ alert('「已买入」请填写买入价'); return; }
-  var arr=watchLoad(); var ex=arr.filter(function(x){return x.code===code;})[0];
-  if(ex && !confirm('该代码已在自选，是否覆盖？')) return;
-  var rec={ code:code, type:type, buy:buy, pos:pos, sl:sl, tp:tp, reason:reason, addedAt:Date.now() };
-  if(ex){ for(var i=0;i<arr.length;i++){ if(arr[i].code===code){ arr[i]=rec; break; } } } else arr.push(rec);
-  watchSave(arr);
-  document.getElementById('wf-code').value=''; document.getElementById('wf-buy').value=''; document.getElementById('wf-pos').value=''; document.getElementById('wf-sl').value=''; document.getElementById('wf-tp').value=''; document.getElementById('wf-reason').value='';
-  refreshWatch();
-}
-function delWatch(code){ var arr=watchLoad().filter(function(x){return x.code!==code;}); watchSave(arr); delete _watchKlineCache[code]; refreshWatch(); }
-function analyzeWatch(stock, quote, klines){
-  if(!klines||klines.length<60) return { err:true };
-  var c=klines.map(function(k){return k.close;}), h=klines.map(function(k){return k.high;}), l=klines.map(function(k){return k.low;});
-  var cur=quote?quote.cur:c[c.length-1];
-  var ma5=sma(c,5),ma10=sma(c,10),ma20=sma(c,20),ma60=sma(c,60);
-  var sl5=ENG.slopePct(c,5), sl20=ENG.slopePct(c,20), sl60=ENG.slopePct(c,60);
-  var adxO=ENG.adxCalc(h,l,c,14);
-  var adx=adxO.adx[adxO.adx.length-1], pdi=adxO.pdi[adxO.pdi.length-1], mdi=adxO.mdi[adxO.mdi.length-1];
-  var dev5=(cur-ma5)/ma5*100, dev10=(cur-ma10)/ma10*100, dev20=(cur-ma20)/ma20*100;
-  var box=ENG.computeBox(h,l,c,{n:60,ampMin:5,ampMax:20});
-  var regime,strength,cls,maBull=(ma5>ma10&&ma10>ma20&&ma20>ma60);
-  if(adx>=25 && pdi>mdi){ regime='趋势上行'; cls='trend'; strength=(maBull&&sl20>0.3)?'强趋势':'普通趋势'; }
-  else if(adx<20){ regime='箱体震荡'; cls='box'; strength='震荡'; }
-  else { regime=(pdi>mdi)?'偏强过渡':'偏弱过渡'; cls='trans'; strength=(adx>=25?'趋势临界':'震荡临界'); }
-  var buyMA=(regime==='趋势上行'&&strength==='强趋势')?ma10:ma20;
-  var stopMA=ma20;   // 趋势股统一破MA20移动止损（原普通趋势用MA60，对高乖离股止损距离过远，如-38%，不具执行性）
-  var bullWhy='';
-  if(regime==='趋势上行' && strength==='普通趋势'){
-    bullWhy = !maBull ? (ma10<ma20?('MA10('+fmt(ma10,2)+')<MA20('+fmt(ma20,2)+')，短均线未修复'):'均线未多头排列') : 'MA20斜率不足(+0.3%/日门槛)';
-  }
-  var advice=[];
-  if(regime==='趋势上行'){
-    advice.push('回踩买点：'+(strength==='强趋势'?('MA10 '+fmt(buyMA,2)):('MA20 '+fmt(buyMA,2))));
-    advice.push('减仓：破 MA5 '+fmt(ma5,2)+' 减半仓（短线动能减弱先兑现）');
-    advice.push('移动止损：破 MA20 '+fmt(stopMA,2)+' 清仓（科创板−15%硬砍兜底）');
-    advice.push('不预设目标价，破线即走、让利润奔跑');
-  } else if(regime==='箱体震荡'){
-    advice.push('箱体 '+fmt(box.boxLow,2)+'~'+fmt(box.boxHigh,2)+'（幅度'+box.amp.toFixed(1)+'%）');
-    advice.push(box.zone==='箱底区'?'箱底区：缩量企稳≤30%分两笔低吸':box.zone==='箱顶区'?'箱顶区：缩量滞涨减仓，放量突破再跟':'中部：不追不抄，等回箱底或破箱顶');
-    if(box.zone==='箱底区') advice.push('买点≈箱底×1.01，止损破箱底−4%，止盈箱顶×0.98');
-    advice.push('减仓/止盈：箱顶×0.98 = '+fmt(box.boxHigh*0.98,2));
-  } else {
-    advice.push('走势未明（ADX'+fmt(adx,1)+'），观望，等 ADX 突破25或跌破20');
-  }
-  if(dev10>15) {} /* 乖离警示仅在提醒横幅显示一次，避免卡内重复 */
-  /* ── 压力位 / 支撑位 ── */
-  var res20=Math.max.apply(null,h.slice(-20)), res60=Math.max.apply(null,h.slice(-60)), sup20=Math.min.apply(null,l.slice(-20));
-  var resList=[], supList=[];
-  if(regime==='趋势上行'){
-    resList.push(['R1 近20日高',res20]);
-    if(res60>res20*1.005) resList.push(['R2 近60日高',res60]);
-    supList.push(['S1 '+(strength==='强趋势'?'MA10':'MA20'),buyMA]);
-    supList.push(['S2 破MA20−3%确认',stopMA*0.97]);
-  } else if(regime==='箱体震荡'){
-    resList.push(['R1 箱顶',box.boxHigh]);
-    supList.push(['S1 箱底',box.boxLow]);
-    supList.push(['S2 破箱底−4%',box.boxLow*0.96]);
-  } else {
-    resList.push(['R1 近20日高',res20]);
-    supList.push(['S1 近20日低',sup20]);
-    supList.push(['S2 MA20',ma20]);
-  }
-  /* ── 建议仓位：结构上限（该走势下的单票上限）+ 当下可执行（超买/走势不明时为0） ── */
-  var posCap, posWhy, posNow;
-  if(regime==='趋势上行'){ posCap=(strength==='强趋势')?30:20; posWhy=(strength==='强趋势')?'强趋势单票上限30%':'普通趋势轻仓试错上限20%'; }
-  else if(regime==='箱体震荡'){ posCap=30; posWhy='箱体低吸单票上限30%'; }
-  else { posCap=0; posWhy='走势未明（ADX'+fmt(adx,1)+'），观望不加仓'; }
-  posNow=posCap;
-  if(regime==='趋势上行' && dev10>15){ posNow=0; posWhy='乖离MA10 +'+dev10.toFixed(1)+'% 禁追高，仓位0%等回踩'; }
-  if(stock.type==='hold' && stock.pos!=null) posWhy+=(posNow>0?('，当前已持有'+stock.pos+'%'):'，当前已持有'+stock.pos+'%，建议等回踩补仓而非此刻追');
-  /* ── 盈亏比（含计算过程）：买点→目标 vs 买点→止损 ── */
-  var rrr=null, rrrE=null, rrrS=null, rrrT=null, rrrCalc='';
-  if(regime==='趋势上行'){
-    rrrE=buyMA; rrrS=stopMA*0.97; rrrT=res20;   // 止损执行价按破MA20后−3%确认计（防假摔扫损）
-  } else if(regime==='箱体震荡'){
-    rrrE=box.boxLow*1.01; rrrS=box.boxLow*0.96; rrrT=box.boxHigh*0.98;
-  }
-  if(rrrE!=null && rrrT>rrrE && rrrE>rrrS){
-    rrr=(rrrT-rrrE)/(rrrE-rrrS);
-    rrrCalc='('+fmt(rrrT,2)+'−'+fmt(rrrE,2)+')÷('+fmt(rrrE,2)+'−'+fmt(rrrS,2)+')='+fmt(rrrT-rrrE,2)+'÷'+fmt(rrrE-rrrS,2);
-  }
-  var hold=null;
-  if(stock.type==='hold' && stock.buy!=null){ var pnl=(cur-stock.buy)/stock.buy*100; hold={pnl:pnl, dSL:(stock.sl!=null?((cur-stock.sl)/stock.sl*100):null), dTP:(stock.tp!=null?((stock.tp-cur)/cur*100):null)}; }
-  return { regime:regime, regimeCls:cls, strength:strength, bullWhy:bullWhy, cur:cur, adx:adx, pdi:pdi, mdi:mdi, dev5:dev5, dev10:dev10, dev20:dev20, ma5:ma5,ma10:ma10,ma20:ma20,ma60:ma60, buyMA:buyMA, stopMA:stopMA, box:box, advice:advice, hold:hold, resList:resList, supList:supList, posCap:posCap, posNow:posNow, posWhy:posWhy, rrr:rrr, rrrCalc:rrrCalc, rrrE:rrrE, rrrS:rrrS, rrrT:rrrT };
-}
-function checkWatchAlert(stock, an, quote){
-  if(!an||an.err) return [];
-  var cur=an.cur, a=[];
-  if(stock.type==='hold' && stock.sl!=null && cur<=stock.sl) a.push({lvl:'danger',msg:'触及止损 '+stock.sl+'，建议清仓'});
-  if(stock.type==='hold' && stock.tp!=null && cur>=stock.tp) a.push({lvl:'warn',msg:'触及止盈 '+stock.tp+'，建议减仓落袋'});
-  if(an.regime==='趋势上行'){ if(Math.abs(cur-an.buyMA)/an.buyMA<0.02) a.push({lvl:'buy',msg:'回踩到买点 '+fmt(an.buyMA,2)+'，可介入/加仓'}); }
-  else if(an.regime==='箱体震荡'){ if(an.box.zone==='箱底区') a.push({lvl:'buy',msg:'箱底区，可低吸'}); else if(an.box.zone==='箱顶区') a.push({lvl:'warn',msg:'箱顶区，宜高抛'}); }
-  if(an.dev10>15) a.push({lvl:'warn',msg:'乖离MA10 '+an.dev10.toFixed(1)+'%，超买禁追高'});
-  return a;
-}
-function escapeHtml(s){ return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
-function renderWatchCard(stock,an,q,alerts){
-  var name=(q&&q.name&&!/\uFFFD/.test(q.name))?q.name:stock.code;   // 名称解码失败时回退显示代码
-  var cur=q?q.cur:an.cur, chg=q?q.chg:0;
-  var col=chg>=0?'var(--up)':'var(--down)', sign=chg>=0?'+':'';
-  var tag=stock.type==='hold'?'<span class="w-tag hold">持有</span>':'<span class="w-tag watch">观察</span>';
-  var reg=an.err?'分析失败':(an.regime+' · '+(an.strength||'')+(an.bullWhy?('（未达强趋势：'+an.bullWhy+'）'):'')+' ｜ ADX '+fmt(an.adx,1)+(an.dev10!=null?(' ｜ 偏离MA10 '+an.dev10.toFixed(1)+'%'):''));
-  var adv=(an.advice||[]).map(function(s){return '· '+s;}).join('<br>');
-  var hold=an.hold?('盈亏 <b style="color:'+(an.hold.pnl>=0?'var(--up)':'var(--down)')+'">'+(an.hold.pnl>=0?'+':'')+an.hold.pnl.toFixed(2)+'%</b>'+(an.hold.dSL!=null?(' ｜ 距止损 '+an.hold.dSL.toFixed(1)+'%'):'')+(an.hold.dTP!=null?(' ｜ 距止盈 +'+an.hold.dTP.toFixed(1)+'%'):'')):'';
-  /* 压力/支撑/仓位/盈亏比 三行 */
-  var lvls='';
-  if(an.resList&&an.resList.length){
-    lvls+='<div class="w-advice">· 压力：'+an.resList.map(function(x){return x[0]+' <b>'+fmt(x[1],2)+'</b>';}).join(' ｜ ')+'</div>';
-    lvls+='<div class="w-advice">· 支撑：'+an.supList.map(function(x){return x[0]+' <b>'+fmt(x[1],2)+'</b>';}).join(' ｜ ')+'</div>';
-  }
-  if(an.posCap!=null){
-    lvls+='<div class="w-advice">· 建议仓位：结构上限 <b>'+(an.posCap?('≤'+an.posCap+'%'):'0%')+'</b>'
-      +(an.posNow<an.posCap?('，当下 <b style="color:var(--down)">0%</b>（'+an.posWhy+'）'):('（'+an.posWhy+'，分两笔）'))
-      +'</div>';
-  }
-  if(an.rrr!=null){
-    lvls+='<div class="w-advice">· 盈亏比 <b style="color:'+(an.rrr<2?'var(--down)':'var(--up)')+'">≈'+an.rrr.toFixed(1)+'</b>'
-      +(an.rrr<2?'（<2 手册门槛不做）':'（≥2 可做）')
-      +'<br>　买点 '+fmt(an.rrrE,2)+' ｜ 目标 '+fmt(an.rrrT,2)+(an.regime==='趋势上行'?'（近20日高，趋势股仅参考，实际破线即走）':'（箱顶×0.98）')
-      +' ｜ 止损 '+fmt(an.rrrS,2)+(an.regime==='趋势上行'?'（破MA20−3%确认）':'（破箱底−4%）')
-      +'<br>　计算：'+an.rrrCalc+'</div>';
-  }
-  var al=alerts.length?alerts.map(function(x){return '<div class="w-alert '+x.lvl+'">'+(x.lvl==='buy'?'🟢 ':x.lvl==='warn'?'🟡 ':'🔴 ')+x.msg+'</div>';}).join(''):'';
-  var reason=stock.reason?('<div class="w-reason">逻辑：'+escapeHtml(stock.reason)+'</div>'):'';
-  return '<div class="wcard '+an.regimeCls+'">'
-    +'<div class="w-h"><span class="w-nm">'+name+' <span style="font-size:11px;color:var(--sub)">'+stock.code+'</span></span><span>'+tag+'<button class="w-del" data-code="'+stock.code+'">删除</button></span></div>'
-    +'<div class="w-px" style="color:'+col+'">'+fmt(cur,2)+' <span style="font-size:12px">'+sign+fmt(chg,2)+'%</span></div>'
-    +'<div class="w-reg">'+reg+'</div>'
-    +(hold?'<div class="w-advice">'+hold+'</div>':'')
-    +'<div class="w-advice">'+adv+'</div>'+lvls+al+reason+'</div>';
-}
-function refreshWatch(){
-  var list=document.getElementById('wf-list'); var sum=document.getElementById('wf-summary');
-  if(!list) return;
-  try{
-  if(!ENG.fetchRealtime || !ENG.fetchKlinePeriod){ list.innerHTML='<div class="watch-empty">行情引擎未就绪，稍后自动重试…</div>'; return; }
-  var arr=watchLoad();
-  if(!arr.length){ list.innerHTML='<div class="watch-empty">暂无自选股。输入代码（如 688137）+ 选择「已买入/仅观察」+ 填写买入价/仓位/止损/止盈/理由，工具将自动跟踪走势，并在到达买点/止盈/止损/加减仓位时提醒。</div>'; if(sum) sum.innerHTML=''; window.__watchRenderedAt=Date.now(); return; }
-  if(marketPhase()==='周末休市'){ window.__watchRenderedAt=Date.now(); return; }
-  var codes=arr.map(function(x){return x.code;});
-  ENG.fetchRealtime(codes).then(function(qt){
-    var jobs=arr.map(function(stock){
-      var cache=_watchKlineCache[stock.code];
-      if(cache && Date.now()-cache.ts<30*60*1000) return Promise.resolve(cache.k);
-      return ENG.fetchKlinePeriod(stock.code,'day',120).then(function(k){ _watchKlineCache[stock.code]={ts:Date.now(),k:k}; return k; }).catch(function(){ return null; });
-    });
-    Promise.all(jobs).then(function(kls){
-      var html='', all=[];
-      arr.forEach(function(stock,i){
-        var q=qt[stock.code], kl=kls[i];
-        if(!q && !kl){ html+='<div class="wcard"><div class="w-h"><span class="w-nm">'+stock.code+'</span></div><div class="w-reason">行情获取失败</div></div>'; return; }
-        var an=analyzeWatch(stock,q,kl), al=checkWatchAlert(stock,an,q);
-        al.forEach(function(x){ all.push({code:stock.code,name:q?q.name:stock.code,lvl:x.lvl,msg:x.msg}); });
-        html+=renderWatchCard(stock,an,q,al);
-      });
-      list.innerHTML=html;
-      window.__watchRenderedAt=Date.now();
-      if(sum){
-        if(all.length){
-          var dgr=all.filter(function(x){return x.lvl==='danger';}).length;
-          sum.className='w-summary'+(dgr?'':' ok');
-          sum.innerHTML='<b>⚠️ 提醒（'+all.length+'）：</b>'+all.map(function(x){return x.code+' '+x.msg;}).join(' ｜ ');
-          all.forEach(function(x){ notify(x.code+' '+x.msg, x.name); });
-        } else { sum.className='w-summary ok'; sum.innerHTML='<b>✓ 监控中</b>：'+arr.length+' 只自选股，暂无触发提醒（止盈/止损/买点/加减仓）。'; }
-      }
-      Array.prototype.forEach.call(list.querySelectorAll('.w-del'), function(b){ b.onclick=function(){ delWatch(b.getAttribute('data-code')); }; });
-    });
-  }).catch(function(){ list.innerHTML='<div class="watch-empty">实时行情获取失败，请检查网络后稍候自动重试。</div>'; });
-  }catch(e){ list.innerHTML='<div class="watch-empty">自选刷新异常：'+escapeHtml(e.message||e)+'（稍后自动重试）</div>'; }
-}
-function notify(title,body){ try{ if('Notification' in window && Notification.permission==='granted'){ new Notification(title,{body:body||''}); } }catch(e){} }
 function registerSW(){ if(!('serviceWorker' in navigator)) return; if(location.protocol!=='https:' && location.protocol!=='http:') return; window.addEventListener('load', function(){ navigator.serviceWorker.register('./sw.js').catch(function(){}); }); }
 /* ============ 周线形态选股（周线两周转折 + 套牢盘压力评估） ============ */
 function wkNormCode(input){
@@ -4126,9 +3899,8 @@ function initMa20Scan(){
   // 载入缓存（30分钟内有效）
   try{ var c=kvGet('MA20_BREAK_V1'); if(c&&c.ts&&Date.now()-c.ts<30*60*1000 && c.ratio!=null) renderMa20Result(c,true); }catch(e){}
 }
-async function initApp(){ await kvInit(); buildViews(); initNav(); refreshWatch(); bindCooldown(); registerSW(); bindWeekly(); initMa20Scan(); _kvRefreshSyncBadge(); }
+async function initApp(){ await kvInit(); buildViews(); initNav(); bindCooldown(); registerSW(); bindWeekly(); initMa20Scan(); _kvRefreshSyncBadge(); }
 initApp();
-setInterval(refreshWatch, 120000);
 </script>
 </body>
 </html>

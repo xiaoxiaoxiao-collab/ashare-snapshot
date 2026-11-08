@@ -153,6 +153,10 @@
   .tcard .tc-mlp b{color:var(--up)}
   .tcard .tc-role{font-size:11.5px;margin-top:4px;padding:5px 7px;background:#16202e;border-radius:6px;border-left:3px solid var(--up);color:#dbe6f2;line-height:1.55}
   .tcard .tc-role b{color:var(--up)}
+  .tcard .tc-t.ma-spread{font-size:11.5px;margin-top:3px;color:#cdd6e4;border-left:3px solid var(--blue);padding-left:7px;line-height:1.5}
+  .tcard .tc-t.ma-spread b{color:var(--blue)}
+  .tcard .ma-spread .spread-warn{color:var(--up);font-weight:700}
+  .tcard .ma-spread .spread-ok{color:#7c8aa3;font-size:11px}
   .pb{background:linear-gradient(135deg,#161b22,#1b2330);border:1px solid #2a3646;border-radius:12px;padding:12px 14px;margin-bottom:10px;font-size:13px}
   .pb .row{display:flex;align-items:flex-start;margin:7px 0;line-height:1.55;gap:10px}
   .pb .lb{min-width:4.4em;flex:0 0 auto;white-space:nowrap;color:var(--blue);font-weight:600;font-size:12.5px;padding-top:1px}
@@ -2019,6 +2023,19 @@ function renderTrend(t, regime, conf, d){
       const buyHint = (s.status==='pullback'&&s.atBuy) ? ' · <b style="color:var(--up)">已回踩至'+s.buyMAName+'买点附近</b>'
                     : ((s.status==='pullback') ? ' · 回调中(等'+s.buyMAName+')' : '');
       const actCls = o.act.indexOf('空仓')>=0 ? 't-off' : (o.act.indexOf('减仓')>=0||o.act.indexOf('观望')>=0) ? 't-warn' : 't-on';
+      // 多头排列发散度（量化"多头有多强、是否过热"）：相邻均线乖离率之和，把布尔排列升级为连续强度分
+      var _m5=s.ma5,_m10=s.ma10,_m20=s.ma20,_m60=s.ma60;
+      var _ok = _m5>0&&_m10>0&&_m20>0&&_m60>0;
+      var g1 = _ok ? (_m5/_m10-1)*100 : 0;   // MA5 相对 MA10 乖离%
+      var g2 = _ok ? (_m10/_m20-1)*100 : 0;  // MA10 相对 MA20 乖离%
+      var g3 = _ok ? (_m20/_m60-1)*100 : 0;  // MA20 相对 MA60 乖离%
+      var spread = g1+g2+g3;                 // 综合发散度（%）
+      // 预警判据：缠绕看短中期死叉(g1<0或g2<0)；过热只看短期加速(g1>8%，5日线严重偏离10日线)。
+      // 注意：综合spread含MA20↔MA60乖离(60日跨度天然偏大)，仅作强度展示，不用于过热预警，否则正常多头必误报。
+      var spreadWarn = _ok ? ((g1<0||g2<0) ? '⚠️ 均线缠绕/死叉，排列松动'
+                       : g1>8 ? '⚠️ 短期乖离过大，过热见顶风险' : '') : '';
+      var spreadHealth = spread>=30 ? '强趋势高发散（留意回撤）' : spread>=15 ? '趋势发散进行中' : '温和多头初成';
+      var spreadCls = spreadWarn ? 't-off' : 't-on';
       return `<div class="tcard">
         <div class="tc-h"><span class="nm">${i+1}. ${s.name}</span><span class="px">¥${s.price.toFixed(2)}</span><span class="up">+${s.pct.toFixed(2)}%</span><span class="sub">20日+${s.gain20.toFixed(1)}%</span><span class="sub">额${(s.amt/1e8).toFixed(0)}亿</span><span class="sub">换${s.trn!=null?s.trn.toFixed(0)+'%':'—'}</span></div>
         <div class="tc-a">
@@ -2030,10 +2047,12 @@ function renderTrend(t, regime, conf, d){
           <span class="tag">ATR(14)¥${s.atr.toFixed(2)}</span>
           <span class="tag">箱体${s.boxZone}(${(s.boxPos*100).toFixed(0)}%)</span>
           ${s.rrr<1.5?'<span class="tag t-off">⚠️ 盈亏比&lt;1.5 慎动手</span>':''}
+          <span class="tag ${spreadCls}">发散 ${spread.toFixed(1)}%</span>
         </div>
         <div class="tc-t">买点 回踩<b>¥${s.buy1.toFixed(2)}</b>(${s.buyMAName}) / 支撑<b>¥${s.buy2.toFixed(2)}</b>(${s.strong?'MA20':'MA60'}·破位离场) · 有效止损<b>¥${stopPrice.toFixed(2)}</b>(${o.stopPct.toFixed(1)}%) · 目标<b>¥${s.target.toFixed(2)}</b> · 盈亏比<b class="${s.rrr<1.5?'rrr-bad':''}">${s.rrr.toFixed(1)}</b></div>
         <div class="tc-t atr-lock">🔒 ATR跟踪锁利线 <b>¥${s.trailStop.toFixed(2)}</b>(${s.trailPct.toFixed(1)}% · 近期高收¥${s.peakClose.toFixed(2)}−3×ATR¥${s.atr.toFixed(2)})${s.trailBroken?'<span class="lock-broken"> ⚠️ 现价已破锁利线，应止盈离场</span>':'<span class="lock-ok"> 只上不下，盈利后随新高上移</span>'}</div>
         ${(s.mlPB && regime==='单边上涨') ? '<div class="tc-mlp">✅ <b>§10.12 主线回踩买点</b>：缩量回踩 MA10(乖离'+s.mlDevMA10.toFixed(1)+'%) + 反转确认 · 破MA20硬离场 · 不追高、不补仓</div>' : ''}
+        ${_ok?'<div class="tc-t ma-spread">📐 多头排列发散度 MA5↔MA10 <b>+'+g1.toFixed(1)+'%</b> · MA10↔MA20 <b>+'+g2.toFixed(1)+'%</b> · MA20↔MA60 <b>+'+g3.toFixed(1)+'%</b> · 综合 <b>+'+spread.toFixed(1)+'%</b>'+(spreadWarn?'<span class="spread-warn"> '+spreadWarn+'</span>':'<span class="spread-ok"> '+spreadHealth+'</span>')+'</div>':''}
         <div class="tc-act"><span class="tag ${actCls}">${o.act}</span> 仓位 <b>${o.pos}</b> · ${o.posTxt}${buyHint}</div>
         <div class="tc-tip">🛡️ ${o.tip}<br>⏱️ 时机：${o.timing}</div>
         ${roleBlock}

@@ -51,6 +51,31 @@
   .struct .row .eff-up{color:var(--up);font-weight:700}
   .struct .row .eff-down{color:var(--down);font-weight:700}
   .struct .row .eff-side{color:var(--side);font-weight:700}
+  /* 破MA20占比（全市场容错率代理） */
+  .ma20{margin:4px 0 2px;border:1px solid #2a3646;border-radius:10px;background:#0f1620;padding:10px}
+  .ma20-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .ma20-bar .btn{background:var(--blue);color:#fff;border:0;border-radius:7px;padding:6px 14px;font-size:12.5px;cursor:pointer;font-weight:600}
+  .ma20-bar .btn:disabled{opacity:.6;cursor:default}
+  .ma20-status{font-size:11px;color:var(--sub);line-height:1.5}
+  .ma20-track{height:7px;background:#16202f;border-radius:4px;margin:9px 0 2px;overflow:hidden}
+  .ma20-fill{height:100%;width:0;background:var(--blue);transition:width .2s}
+  .ma20-result{margin-top:9px;font-size:12.5px;line-height:1.6}
+  .m20-top{display:flex;align-items:center;gap:10px;font-size:13.5px}
+  .m20-top b{font-size:15px}
+  .m20-grade{font-weight:700}
+  .m20-bar2{height:8px;background:#16202f;border-radius:4px;margin:7px 0;overflow:hidden}
+  .m20-bar-fill{height:100%;border-radius:4px}
+  .m20-bar-fill.m20-ok{background:var(--down)}
+  .m20-bar-fill.m20-mid{background:var(--side)}
+  .m20-bar-fill.m20-danger{background:var(--up)}
+  .m20-sub{font-size:11px;color:var(--sub);margin:2px 0 4px}
+  .m20-adv{font-size:12px;line-height:1.6;padding:7px 9px;border-radius:7px;border:1px solid var(--line)}
+  .ma20-result.m20-ok .m20-adv{background:rgba(21,196,106,.10);border-color:rgba(21,196,106,.4);color:#86efac}
+  .ma20-result.m20-mid .m20-adv{background:rgba(212,160,23,.10);border-color:rgba(212,160,23,.4);color:#fde68a}
+  .ma20-result.m20-danger .m20-adv{background:rgba(255,77,79,.12);border-color:rgba(255,77,79,.45);color:#fca5a5}
+  .ma20-result.m20-ok .m20-grade{color:var(--down)}
+  .ma20-result.m20-mid .m20-grade{color:var(--side)}
+  .ma20-result.m20-danger .m20-grade{color:var(--up)}
   .struct .struct-advice{margin-top:8px;font-size:12.5px;line-height:1.6;color:var(--txt);background:#0f141b;border:1px solid var(--line);border-radius:8px;padding:8px 10px}
   .struct .struct-advice b{color:var(--blue)}
   .struct .struct-targets{margin-top:9px;border:1px dashed var(--blue);border-radius:8px;padding:8px 10px;background:rgba(59,130,246,.06)}
@@ -477,6 +502,17 @@
 
   <div class="sec-t">🧭 结构性行情判定（指数水温 × 主线分化）</div>
   <div class="struct" id="struct">加载中…</div>
+
+  <div class="sec-t">📉 破MA20占比（全市场容错率代理 · 板块级）</div>
+  <div class="ma20" id="ma20">
+    <div class="ma20-bar">
+      <button id="ma20Scan" class="btn">🔍 扫描全市场</button>
+      <button id="ma20Stop" class="btn" style="display:none">⏹ 停止</button>
+      <span id="ma20Status" class="ma20-status">点「扫描全市场」：逐只拉日K统计收盘&lt;MA20的比例（全市场约5000+只，可中途停止；进度过半即具代表性）</span>
+    </div>
+    <div class="ma20-track" id="ma20Track" style="display:none"><div class="ma20-fill" id="ma20Fill"></div></div>
+    <div class="ma20-result" id="ma20Result">—</div>
+  </div>
 
   <div class="sec-t">📈 周线形态选股（周线两周转折 · 含套牢盘压力评估）</div>
   <div class="weekly" id="weekly">
@@ -1080,6 +1116,25 @@
   }
 
   // 箱体震荡标的筛选（多周期 day/week/month）：流动性门槛 → 个股K线算箱体 → 仅留"箱底区、幅度适中"的可低吸标的，并给出操作意见
+  // 并发受限批处理（复用周线全市场扫描模式）：每批并发 conc，批间可停止
+  function runPool(items, conc, fn, isStop) {
+    return new Promise(function (resolve) {
+      var out = [], done = 0, idx = 0, finished = false;
+      function finish() { if (finished) return; finished = true; resolve(out); }
+      function next() {
+        if (finished) return;
+        if (isStop && isStop()) { finish(); return; }
+        if (done >= items.length) { finish(); return; }
+        if (idx >= items.length) return;
+        var batch = [];
+        while (idx < items.length && batch.length < conc) batch.push(items[idx++]);
+        Promise.all(batch.map(function (it) { return Promise.resolve(fn(it)).catch(function () { return null; }); }))
+          .then(function (rs) { for (var i = 0; i < rs.length; i++) { if (rs[i] != null) out.push(rs[i]); } done += batch.length; if (done >= items.length) finish(); else next(); })
+          .catch(function () { done += batch.length; if (done >= items.length) finish(); else next(); });
+      }
+      next();
+    });
+  }
   function screenRangeStocks(rows, period) {
     period = (period === 'week' || period === 'month') ? period : 'day';
     if (!rows || !rows.length) return Promise.resolve({ count: 0, list: [], period: period });
@@ -1103,16 +1158,16 @@
       if (!isFinite(tr) || tr === 0) continue;          // 停牌
       if (/ST/i.test(name)) continue;
       if (name.charAt(0) === 'N' || name.charAt(0) === 'C') continue;
-      if (nmc * 1e4 < 80e8) continue;                    // 流通市值≥80亿
+      if (nmc * 1e4 < 40e8) continue;                    // 流通市值≥40亿（放宽阈值，纳入更多中盘箱底标的，避免大票垄断候选池）
       if (amt < amtThr) continue;                         // 成交额 ≥ 动态门槛
       if (trn < trnMin || trn > 15) continue;             // 换手 动态下限%–15%
       if (cp <= -3 || cp >= 3) continue;                 // 当日温和（震荡股不应大涨大跌）
       cand.push({ symbol: y.symbol, name: name, price: tr, pct: cp, amt: amt, trn: trn });
     }
     cand.sort(function (a, b) { return b.amt - a.amt; });
-    var top = cand.slice(0, 16);   // 取成交额前16只做K线精筛（周/月K线请求较重，适度放宽原12只限额）
+    var top = cand.slice(0, 40);   // 取成交额前40只做K线精筛（放宽候选池，避免大票垄断致箱底标的归零）
     if (!top.length) return Promise.resolve({ count: 0, list: [], period: period });
-    var jobs = top.map(function (c) {
+    return runPool(top, 8, function (c) {
       return fetchKlinePeriod(c.symbol, period, cfg.count).then(function (kl) {
         kl = kl.slice(-cfg.win);
         if (kl.length < Math.min(45, cfg.win)) return null;
@@ -1140,12 +1195,47 @@
           buy1: buy1, buy2: buy2, stop: stop, stopPct: stopPct, target: target, rrr: rrr
         };
       }).catch(function () { return null; });
-    });
-    return Promise.all(jobs).then(function (arr) {
-      var list = arr.filter(Boolean);
+    }).then(function (list) {
+      list = list.filter(Boolean);
       list.sort(function (a, b) { return a.pos - b.pos; });  // 越靠箱底越靠前
       return { count: list.length, list: list, period: period };
     });
+  }
+
+  // 破MA20占比（全市场容错率代理·板块级）：遍历全市场个股逐只拉日K算MA20，统计收盘<MA20的比例
+  function scanMa20Break(opts) {
+    opts = opts || {};
+    var br = _ctx ? _ctx.br : null;
+    if (!br || !br.rows || !br.rows.length) return Promise.reject(new Error('无全市场行情（需盘中实时模式）'));
+    var list = br.rows.filter(function (y) {
+      var name = (y.name || '').trim();
+      if (/ST/i.test(name)) return false;                      // 排ST
+      if (name.charAt(0) === 'N' || name.charAt(0) === 'C') return false; // 排新股
+      var tr = parseFloat(y.trade);
+      if (!isFinite(tr) || tr === 0) return false;            // 排停牌
+      return true;
+    });
+    // Fisher-Yates 洗牌：使进度条前半段即为全市场无偏抽样，早期占比估计即具代表性
+    for (var i = list.length - 1; i > 0; i--) { var j = Math.floor(Math.random() * (i + 1)); var t = list[i]; list[i] = list[j]; list[j] = t; }
+    var total = list.length, scanned = 0, valid = 0, below = 0;
+    var onProg = opts.onProgress || function () {};
+    function isStop() { return !!(opts.isStop && opts.isStop()); }
+    function snap() { return { total: total, scanned: scanned, valid: valid, below: below, ratio: valid ? below / valid * 100 : 0, stopped: isStop() }; }
+    return runPool(list, 8, function (y) {
+      if (isStop()) return null;
+      return fetchKlinePeriod(y.symbol, 'day', 40).then(function (kl) {
+        if (!kl || kl.length < 20) return null;
+        var close = kl.map(function (r) { return r.close; });
+        var n = 20, s = 0; for (var k = close.length - n; k < close.length; k++) s += close[k];
+        var ma20 = s / n, c = close[close.length - 1];
+        return { below: c < ma20 };
+      }).catch(function () { return null; }).then(function (r) {
+        if (r) { valid++; if (r.below) below++; }
+        scanned++;
+        onProg(snap());
+        return r;
+      });
+    }, isStop).then(function () { return snap(); });
   }
 
   // 补涨龙候选：封板池中连板数较低(1–2板)的低位跟风股，排除总龙头（风险高，仅小仓试错）
@@ -1787,7 +1877,7 @@
     fetchBreadth: fetchBreadth, fetchLimitPools: fetchLimitPools, analyzeDirect: analyzeDirect,
     analyzeMainLine: analyzeMainLine, screenTrendStocks: screenTrendStocks,
     computeSentiment: computeSentiment, computeBox: computeBox,
-    screenRangeStocks: screenRangeStocks, identifyBuZhang: identifyBuZhang,
+    screenRangeStocks: screenRangeStocks, identifyBuZhang: identifyBuZhang, scanMa20Break: scanMa20Break,
     fetchConceptMainLine: fetchConceptMainLine, fetchConceptList: fetchConceptList,
     fetchConceptStrength: fetchConceptStrength,
     judgeFast: judgeFast, updateContext: updateContext,
@@ -3858,7 +3948,50 @@ function bindWeekly(){
   if(stopBtn) stopBtn.onclick=function(){ _wkStop=true; document.getElementById('wkProgTxt').textContent='已停止'; };
 }
 
-async function initApp(){ await kvInit(); buildViews(); initNav(); refreshWatch(); bindCooldown(); registerSW(); bindWeekly(); _kvRefreshSyncBadge(); }
+/* ============ 破MA20占比（全市场容错率代理·板块级） ============ */
+function renderMa20Result(s, cached){
+  var el=document.getElementById('ma20Result'); if(!el) return;
+  var r=s.ratio, grade, gcls, advice;
+  if(r>=55){ grade='🔴 危险'; gcls='m20-danger'; advice='破位股占多数，容错率低、亏钱效应显著：多数个股已跌破MA20，回踩难涨回。收缩仓位/空仓，所有买点失效（见§10.7熔断）。'; }
+  else if(r>=35){ grade='🟡 中性'; gcls='m20-mid'; advice='约半数个股破MA20，多空胶着、容错中性偏弱：只做真主线趋势股回踩（§10.12），不在箱体中上部追。'; }
+  else { grade='🟢 健康'; gcls='m20-ok'; advice='多数个股站稳MA20，容错率高、赚钱效应基础在：主线趋势股按“回踩买、破线走”正常做多。'; }
+  el.className='ma20-result '+gcls;
+  el.innerHTML='<div class="m20-top"><b>破MA20占比 '+r.toFixed(1)+'%</b><span class="m20-grade">'+grade+'</span></div>'
+    +'<div class="m20-bar2"><div class="m20-bar-fill '+gcls+'" style="width:'+Math.min(100,r)+'%"></div></div>'
+    +'<div class="m20-sub">样本 '+s.valid+' / 全市场 '+(s.total||0)+(cached?'（缓存）':'（实时扫描）')+'</div>'
+    +'<div class="m20-adv">'+advice+'</div>';
+  try{ kvSet('MA20_BREAK_V1', {ts:Date.now(), ratio:r, valid:s.valid, total:s.total}); }catch(e){}
+}
+function initMa20Scan(){
+  var btn=document.getElementById('ma20Scan'); if(!btn) return;
+  var stopBtn=document.getElementById('ma20Stop');
+  btn.onclick=function(){
+    var br=window.AshareEngine&&window.AshareEngine.getBreadth&&window.AshareEngine.getBreadth();
+    if(!br||!br.rows||!br.rows.length){ document.getElementById('ma20Status').textContent='无全市场行情，请等待盘中实时数据就绪后重试'; return; }
+    btn.disabled=true; btn.textContent='扫描中…';
+    document.getElementById('ma20Track').style.display='block';
+    if(stopBtn) stopBtn.style.display='inline-block';
+    var stop=false;
+    if(stopBtn) stopBtn.onclick=function(){ stop=true; };
+    window.AshareEngine.scanMa20Break({
+      onProgress:function(s){
+        var pct=s.total?Math.round(s.scanned/s.total*100):0;
+        var fill=document.getElementById('ma20Fill'); if(fill) fill.style.width=pct+'%';
+        document.getElementById('ma20Status').textContent='已扫 '+s.scanned+'/'+s.total+' · 有效 '+s.valid+' · 破位 '+s.below+' · 当前占比 '+s.ratio.toFixed(1)+'%';
+        if(s.scanned>=s.total||s.stopped) renderMa20Result(s);
+      },
+      isStop:function(){ return stop; }
+    }).then(function(s){ renderMa20Result(s); })
+      .catch(function(e){ document.getElementById('ma20Status').textContent='扫描失败：'+((e&&e.message)||e); })
+      .then(function(){
+        btn.disabled=false; btn.textContent='🔍 重新扫描';
+        if(stopBtn) stopBtn.style.display='none';
+      });
+  };
+  // 载入缓存（30分钟内有效）
+  try{ var c=kvGet('MA20_BREAK_V1'); if(c&&c.ts&&Date.now()-c.ts<30*60*1000 && c.ratio!=null) renderMa20Result(c,true); }catch(e){}
+}
+async function initApp(){ await kvInit(); buildViews(); initNav(); refreshWatch(); bindCooldown(); registerSW(); bindWeekly(); initMa20Scan(); _kvRefreshSyncBadge(); }
 initApp();
 setInterval(refreshWatch, 120000);
 </script>

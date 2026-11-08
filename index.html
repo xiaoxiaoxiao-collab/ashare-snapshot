@@ -77,6 +77,12 @@
   .ma20-result.m20-ok .m20-grade{color:var(--down)}
   .ma20-result.m20-mid .m20-grade{color:var(--side)}
   .ma20-result.m20-danger .m20-grade{color:var(--up)}
+  .m20-div{display:flex;flex-direction:column;gap:3px;margin-top:9px;padding:8px 9px;border-radius:7px;font-size:12px;line-height:1.55}
+  .m20-div b{font-size:12.5px}
+  .m20-div-c{background:rgba(21,196,106,.12);border:1px solid rgba(21,196,106,.45);color:#86efac}
+  .m20-div-d{background:rgba(255,77,79,.12);border:1px solid rgba(255,77,79,.45);color:#fca5a5}
+  .m20-same{background:rgba(120,160,200,.10);border:1px solid var(--line);color:var(--sub)}
+  .m20-warn{background:rgba(212,160,23,.12);border:1px solid rgba(212,160,23,.45);color:#fde68a}
   .struct .struct-advice{margin-top:8px;font-size:12.5px;line-height:1.6;color:var(--txt);background:#0f141b;border:1px solid var(--line);border-radius:8px;padding:8px 10px}
   .struct .struct-advice b{color:var(--blue)}
   .struct .struct-targets{margin-top:9px;border:1px dashed var(--blue);border-radius:8px;padding:8px 10px;background:rgba(59,130,246,.06)}
@@ -3980,6 +3986,17 @@ function renderMa20Result(s, cached){
   if(tr>=45){ tg='🔴 危险'; tcls='m20-danger'; }
   else if(tr>=25){ tg='🟡 中性'; tcls='m20-mid'; }
   else { tg='🟢 健康'; tcls='m20-ok'; }
+  // 背离研判：①全市场 vs ②趋势股 风险等级差（0健康/1中性/2危险）
+  var lv1 = r>=55?2:(r>=35?1:0), lv2 = tr>=45?2:(tr>=25?1:0), diff = lv1-lv2;
+  var dvTag, dvText, dvCls;
+  if(s.trendTotal && s.trendTotal<100){ dvTag='⚠ 样本不足'; dvText='趋势股样本仅 '+s.trendTotal+' 只，②代表性弱，背离结论谨慎参考。'; dvCls='m20-warn'; }
+  else if(diff>=2){ dvTag='🔼 背离·强势结构'; dvText='全市场危险而趋势股健康：系统性调整中主线仍强，可精选个股。收缩至5–6成、只做真主线§10.12、止损收紧一格，隔日复扫观察②是否抬升。'; dvCls='m20-div-c'; }
+  else if(diff===1){ dvTag='🔼 结构偏强'; dvText='环境弱于结构，主线相对抗跌：控制仓位、精选多头排列完好个股，不碰杂毛补涨。'; dvCls='m20-div-c'; }
+  else if(diff<=-2){ dvTag='🔽 背离·虚假繁荣'; dvText='全市场健康而趋势股危险：指数红但主线已溃、赚了指数亏了钱。趋势手法（§10.12）冻结、不开新仓，警惕指数虚涨（§3）。'; dvCls='m20-div-d'; }
+  else if(diff===-1){ dvTag='🔽 结构走弱'; dvText='环境强于结构，主线容错下降：减少趋势股新开仓、已持有者收紧止盈，等待②回落。'; dvCls='m20-div-d'; }
+  else if(lv1===2){ dvTag='同向·共跌'; dvText='全市场与趋势股同步破位，泥沙俱下：执行§10.7熔断、空仓观望。'; dvCls='m20-same'; }
+  else if(lv1===0){ dvTag='同向·共涨'; dvText='全市场与趋势股同步健康，全面进攻窗口：趋势股按§10.12正常做多。'; dvCls='m20-same'; }
+  else { dvTag='同向·中性'; dvText='两口径均中性，多空胶着：只做真主线回踩，不追箱体中上部。'; dvCls='m20-same'; }
   el.className='ma20-result '+gcls;
   el.innerHTML='<div class="m20-top"><b>① 全市场破MA20占比 '+r.toFixed(1)+'%</b><span class="m20-grade">'+grade+'</span></div>'
     +'<div class="m20-bar2"><div class="m20-bar-fill '+gcls+'" style="width:'+Math.min(100,r)+'%"></div></div>'
@@ -3987,7 +4004,8 @@ function renderMa20Result(s, cached){
     +'<div class="m20-top m20-trend"><b>② 趋势股破MA20占比 '+tr.toFixed(1)+'%</b><span class="m20-grade">'+tg+'</span></div>'
     +'<div class="m20-bar2"><div class="m20-bar-fill '+tcls+'" style="width:'+Math.min(100,tr)+'%"></div></div>'
     +'<div class="m20-sub">'+(s.trendTotal?('多头排列趋势股 '+s.trendTotal+' 只 · 其中已破位 '+s.trendBelow+' 只'):'（无趋势股样本）')+'</div>'
-    +'<div class="m20-adv">'+advice+'</div>';
+    +'<div class="m20-adv">'+advice+'</div>'
+    +'<div class="m20-div '+dvCls+'"><b>'+dvTag+'</b><span>'+dvText+'</span></div>';
   try{ kvSet('MA20_BREAK_V1', {ts:Date.now(), ratio:r, valid:s.valid, total:s.total, trendRatio:tr, trendTotal:s.trendTotal, trendBelow:s.trendBelow}); }catch(e){}
 }
 function initMa20Scan(){

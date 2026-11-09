@@ -3312,12 +3312,9 @@ async function load(){
   let wd=setTimeout(function(){ setStatus('超时(75s)：数据源无响应，请检查网络后点刷新', true); loading=false; },75000);
   try{
     let d;
-    // 智能模式：auto=交易时段实时优先、非交易快照优先；?live=1 强制实时，?snap=1 强制快照
-    let preferLive;
-    if(forceMode==='live') preferLive=true;
-    else if(forceMode==='snap') preferLive=false;
-    else preferLive=isTradingNow();   // 盘中实时优先，盘后/午休快照优先
-    if(preferLive){
+    // 三种模式：live=强制实时 / snap=强制快照 / auto=智能（盘中实时优先、盘后快照优先）
+    if(forceMode==='live'){
+      // 强制实时：优先直连；直连失败才回退云端快照（不会卡在「切不回」）
       let directD=null, ok=false;
       try{
         directD=await window.AshareEngine.analyzeDirect();
@@ -3327,15 +3324,34 @@ async function load(){
       else{
         const snap=await loadSnapshot().catch(()=>null);
         if(snap && snap.analysis){ d=await buildAnalysisFromSnapshot(snap); liveFallback=true; }
-        else if(directD){ d=directD; liveFallback=false; }   // 连快照也没有，仍用实时（可能为空）
         else throw new Error('实时与云端快照均不可用');
       }
-    }else{
+    }else if(forceMode==='snap'){
+      // 强制快照：只读云端快照，绝不回退实时——这是「能从快照切实时、却切不回快照」的根因修复
       const snap=await loadSnapshot().catch(()=>null);
-      if(snap && isFreshSnapshot(snap) && snap.analysis){ d=await buildAnalysisFromSnapshot(snap); liveFallback=false; }
-      else{
-        try{ d=await window.AshareEngine.analyzeDirect(); liveFallback=false; }
-        catch(e){ if(snap&&snap.analysis){ d=await buildAnalysisFromSnapshot(snap); } else throw e; }
+      if(snap && snap.analysis){ d=await buildAnalysisFromSnapshot(snap); liveFallback=false; }
+      else throw new Error('云端快照不可用，无法切换至快照模式（请检查网络或 ?snap= 地址）');
+    }else{
+      // 智能模式：盘中实时优先，盘后/午休快照优先
+      if(isTradingNow()){
+        let directD=null, ok=false;
+        try{
+          directD=await window.AshareEngine.analyzeDirect();
+          if(directD && directD.ticks && directD.ticks.sh000001 && directD.ticks.sh000001.cur) ok=true;
+        }catch(e){ ok=false; }
+        if(ok){ d=directD; liveFallback=false; rtFailCount=0; }
+        else{
+          const snap=await loadSnapshot().catch(()=>null);
+          if(snap && snap.analysis){ d=await buildAnalysisFromSnapshot(snap); liveFallback=true; }
+          else throw new Error('实时与云端快照均不可用');
+        }
+      }else{
+        const snap=await loadSnapshot().catch(()=>null);
+        if(snap && isFreshSnapshot(snap) && snap.analysis){ d=await buildAnalysisFromSnapshot(snap); liveFallback=false; }
+        else{
+          try{ d=await window.AshareEngine.analyzeDirect(); liveFallback=false; }
+          catch(e){ if(snap&&snap.analysis){ d=await buildAnalysisFromSnapshot(snap); } else throw e; }
+        }
       }
     }
     clearTimeout(wd);
@@ -3343,6 +3359,8 @@ async function load(){
     render(d);
     if(!window.__app) window.__app={view:'market',isLive:false};
     window.__app.isLive=(d.mode==='direct'||liveFallback);
+    // 记录「实际当前模式」(live/snap)，供切换按钮按真实状态而非 URL/时间反推来翻转，杜绝切不回快照
+    window.__app.curMode=(d.mode==='direct'&&!liveFallback) ? 'live' : 'snap';
     syncLive();   // 按当前所在视图与实时状态，启停高频实时重绘（切走即停、切回即启）
     // 趋势股精筛在后台异步完成，回填卡片（忽略过期轮次）
     if(d.trendPromise&&d.trendPromise.then){
@@ -3369,11 +3387,9 @@ async function load(){
 document.getElementById('rf').onclick=function(){ load(); };
 document.getElementById('modeBtn').onclick=function(){
   const u=new URLSearchParams(location.search);
-  // 当前解析出的模式：显式 live=1→实时；显式 snap=1→快照；auto 则按交易时段推导
-  const cur = /live=1/.test(location.search) ? 'live'
-            : /snap=1/.test(location.search) ? 'snap'
-            : (isTradingNow() ? 'live' : 'snap');
-  if(cur === 'live'){ u.delete('live'); u.set('snap','1'); }   // 实时→强制快照（交易时段也能切，而非退回auto实时）
+  // 以「实际当前模式」为准翻转，避免从 URL/交易时段反推导致的误判与「切不回快照」
+  const cur = (window.__app && window.__app.curMode) || (/live=1/.test(location.search) ? 'live' : (/snap=1/.test(location.search) ? 'snap' : (isTradingNow() ? 'live' : 'snap')));
+  if(cur === 'live'){ u.delete('live'); u.set('snap','1'); }   // 实时→强制快照
   else { u.delete('snap'); u.set('live','1'); }                // 快照→强制实时
   location.search = u.toString();
 };
@@ -3592,7 +3608,7 @@ function initNav(){
   showView(init);
 }
 
-function registerSW(){ if(!('serviceWorker' in navigator)) return; if(location.protocol!=='https:' && location.protocol!=='http:') return; window.addEventListener('load', function(){ navigator.serviceWorker.register('./sw.js').catch(function(){}); }); }
+function registerSW(){ if(!('serviceWorker' in navigator)) return; if(location.protocol!=='https:' && location.protocol!=='http:') return; window.addEventListener('load', function(){ navigator.serviceWorker.register('./sw.js', {updateViaCache:'none'}).catch(function(){}); }); }
 /* ============ 周线形态选股（周线两周转折 + 套牢盘压力评估） ============ */
 function wkNormCode(input){
   if(!input) return null;

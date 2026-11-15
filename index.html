@@ -19,6 +19,7 @@
   .top{display:flex;justify-content:space-between;align-items:center;gap:8px}
   .top>div:last-child{flex:1 1 0%;min-width:0}  /* 右列允许收缩，防 nowrap 状态行撑破 flex 造成横向溢出 */
   .top h1{font-size:17px;margin:0;font-weight:700;white-space:nowrap;flex-shrink:0}
+  .appver{display:inline-block;font-size:10px;font-weight:700;color:#6ea8fe;background:rgba(110,168,254,.12);border:1px solid rgba(110,168,254,.35);border-radius:5px;padding:1px 5px;vertical-align:middle;letter-spacing:.3px;margin-left:2px;font-variant-numeric:tabular-nums}
   .top .upd{font-size:11px;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;margin-left:auto;font-variant-numeric:tabular-nums}
   .btn{background:var(--card);border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:6px 12px;font-size:13px}
   .ticks{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
@@ -539,7 +540,7 @@
   <script src="stocks.js"></script>
   <div class="topfix">
     <div class="top">
-      <h1>📊 五维共振 <span class="livebadge" id="liveBadge" style="display:none"></span></h1>
+      <h1>📊 五维共振 <span class="appver" title="前端版本号：与线上一致才是最新版">v5·1115</span> <span class="livebadge" id="liveBadge" style="display:none"></span></h1>
       <div style="text-align:right">
         <div class="upd" id="upd">加载中…</div>
         <div style="margin-top:4px">
@@ -3612,7 +3613,7 @@ function buildViews(){
   /* 大盘：研判总览（水温仓位 / 势道 / 五维 / 情绪·含打板可选参考 / 操作建议 / 转向） */
   ['ticks','verdict','daototal','alert','pb','sent','breakout','dims','trigs'].forEach(function(id){ mvTo(id, vM); });
   /* 主线：合并散落的主线信息（结构性行情 / 主线强度 / 概念主线 / 题材角色） */
-  ['struct','ml','concept','boardStart','roles'].forEach(function(id){ mvTo(id, vML); });
+  ['struct','ml','boardStart','concept','roles'].forEach(function(id){ mvTo(id, vML); });
   /* 趋势：趋势股作战（候选 + 破MA20双口径） */
   mvTo('trend', vT); mvTo('ma20', vT);
   /* 箱体：震荡作战（位置 + 方法论 + 多周期箱底低吸） */
@@ -3680,7 +3681,24 @@ function initNav(){
   showView(init);
 }
 
-function registerSW(){ if(!('serviceWorker' in navigator)) return; if(location.protocol!=='https:' && location.protocol!=='http:') return; window.addEventListener('load', function(){ navigator.serviceWorker.register('./sw.js', {updateViaCache:'none'}).catch(function(){}); }); }
+function registerSW(){
+  if(!('serviceWorker' in navigator)) return;
+  if(location.protocol!=='https:' && location.protocol!=='http:') return;
+  window.addEventListener('load', function(){
+    var hadCtl = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.register('./sw.js', {updateViaCache:'none'}).then(function(reg){
+      try{ reg.update(); }catch(e){}
+      // 从旧 SW 切换到新 SW 时自动刷新一次，避免停留在缓存的旧页面
+      if(hadCtl){
+        navigator.serviceWorker.addEventListener('controllerchange', function(){
+          if(window.__swReloaded) return;
+          window.__swReloaded = true;
+          location.reload();
+        });
+      }
+    }).catch(function(){});
+  });
+}
 /* ================== 🎯 板块启动筛选（手册第十二章） ==================
    同源算法：/workspace/board_start_screen.py 的 MODE_CFG / check_conditions
    参数三处一致：本文件 BS_MODE_CFG ↔ Python MODE_CFG ↔ 手册 §12.3

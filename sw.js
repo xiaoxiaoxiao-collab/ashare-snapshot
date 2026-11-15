@@ -2,7 +2,7 @@
    关键修复：index.html / sw.js / stocks.js 改为「网络优先」，
    确保部署新版本后浏览器永远拉取服务端最新文件，不再被旧缓存卡住。
    缓存名升级到 v3：激活时删除所有旧缓存（含 v2 中那份旧 index.html）。 */
-const CACHE = 'ashare-v3';
+const CACHE = 'ashare-v4';
 const CORE = ['./manifest.json', './icon.svg', './icon-192.png', './icon-512.png'];
 // 这些文件「网络优先」：先请求服务端，失败才退回缓存，避免版本僵死
 const NETWORK_FIRST = ['/index.html', '/sw.js', '/stocks.js'];

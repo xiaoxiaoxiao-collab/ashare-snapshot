@@ -487,7 +487,7 @@
   <script src="stocks.js"></script>
   <div class="topfix">
     <div class="top">
-      <h1>📊 五维共振 <span class="appver" title="前端版本号：与线上一致才是最新版">v6·1117</span> <span class="livebadge" id="liveBadge" style="display:none"></span></h1>
+      <h1>📊 五维共振 <span class="appver" title="前端版本号：与线上一致才是最新版">v6·1118</span> <span class="livebadge" id="liveBadge" style="display:none"></span></h1>
       <div style="text-align:right">
         <div class="upd" id="upd">加载中…</div>
         <div style="margin-top:4px">
@@ -554,6 +554,7 @@
         </select>
       </label>
       <label><input type="checkbox" id="bsAttr" checked> 排除属性类板块</label>
+      <label><input type="checkbox" id="bsFullOnly" checked> 只看4/4全命中</label>
       <button id="bsRun" class="btn">🔍 扫描板块与个股</button>
       <button id="bsStop" class="btn" style="display:none">⏹ 停止</button>
     </div>
@@ -3636,6 +3637,7 @@ function registerSW(){
   var BS_ATTR_WORDS = ['重仓','含H股','融资融券','超大盘','央企','国企','业绩','解禁','指数','成份','成分','AH股','破净','预增','预降','次新','送转','举牌','增持','减持','回购','股权激励','MSCI','富时','沪深300','上证','深证','中证','QFII','社保','基金','保险','券商','信托','银行','参股','低价','高价','ST股','B股','GDR','转融','标普','茅指数','宁组合'];
   var BS_BOARD_TOP = 36, BS_STOCK_PER = 15, BS_MIN_KL = 90, BS_PULLBACK = 0.98;
   var _bsStop = false, _bsRunning = false, _bsKL = {}, _bsLastDate = '';
+  var _bsCache = null;   // 缓存最近一次扫描结果，供"只看全命中"开关即时重渲染，无需重新扫描
 
   function isAttr(n){ for(var i=0;i<BS_ATTR_WORDS.length;i++){ if(n.indexOf(BS_ATTR_WORDS[i])>=0) return true; } return false; }
   function smaL(a,n){ if(!a||a.length<n) return null; var s=0; for(var i=a.length-n;i<a.length;i++) s+=a[i]; return s/n; }
@@ -3758,20 +3760,24 @@ function registerSW(){
       idx++; h+='<span class="bs-cond '+(cond[k]?'y':'n')+'" style="padding:0 5px" title="'+esc(k)+'">'+(cond[k]?'✔':'✘')+'</span>';
     } return h;
   }
-  function cardHTML(b, idx){
+  function cardHTML(b, idx, fullOnly){
     var d=b.detail, h='', i, s, full=0;
     for(i=0;i<b.stocks.length;i++) if(b.stocks[i].hit>=b.stocks[i].total) full++;
+    // 只看全命中模式：仅渲染 4/4 的板块；个股列表也只留全命中的
+    if(fullOnly && b.hit<b.total) return '';
+    var stocks = fullOnly ? b.stocks.filter(function(x){ return x.hit>=x.total; }) : b.stocks;
+    var shownFull = fullOnly ? stocks.length : full;
     h+='<div class="bs-card '+(b.hit>=b.total?'full':'')+'">';
     h+='<div class="bs-h"><span class="nm">'+esc(b.name)+'</span>'
       +'<span style="font-size:11px;color:var(--sub)">当日 '+fmt2(b.pct)+'% · 合成 '+b.nCons+' 只 · 净值 '+fmt2(b.nav)+' · '+esc(b.lastDate||'')+'</span>'
       +'<span class="hit">'+(b.hit>=b.total?'★ 全命中':'部分命中')+' '+b.hit+'/'+b.total+'</span></div>';
     h+='<div class="bs-conds">'+condChips(b.cond)+'</div>';
     h+='<div class="bs-detail">'+esc(d['①']||'')+'<br>'+esc(d['②']||'')+'<br>'+esc(d['③']||'')+'<br>'+esc(d['④']||'')+'</div>';
-    h+='<div class="bs-toggle" data-bs="'+idx+'">▸ 展开板块内个股（显示 '+b.stocks.length+' 只，'+full+' 只全命中）</div>';
+    h+='<div class="bs-toggle" data-bs="'+idx+'">▸ 展开板块内个股（显示 '+stocks.length+' 只，'+shownFull+' 只全命中）</div>';
     h+='<div class="bs-stocks" id="bss-'+idx+'">';
-    if(!b.stocks.length) h+='<div class="bs-note">板块内无满足最少 K 线的成分股。</div>';
-    for(i=0;i<b.stocks.length;i++){
-      s=b.stocks[i];
+    if(!stocks.length) h+='<div class="bs-note">'+(fullOnly?'本板块无 4/4 全命中个股。':'板块内无满足最少 K 线的成分股。')+'</div>';
+    for(i=0;i<stocks.length;i++){
+      s=stocks[i];
       h+='<div class="bs-stk"><span class="c">'+esc(s.name)+' '+esc(s.symbol)+'</span>'
         +'<span>'+fmt2(s.close)+' ('+(s.pct>=0?'+':'')+fmt2(s.pct)+'%)</span>'
         +'<span class="h">'+(s.hit>=s.total?'★ ':'')+s.hit+'/'+s.total+' '+miniConds(s.cond)+'</span></div>';
@@ -3787,16 +3793,22 @@ function registerSW(){
     var a=document.getElementById('bsRun'), b=document.getElementById('bsStop');
     if(a) a.style.display=run?'none':''; if(b) b.style.display=run?'':'none';
   }
-  function renderBoards(boards, mode, noAttr){
-    var full=0, i; for(i=0;i<boards.length;i++) if(boards[i].hit>=boards[i].total) full++;
+  function renderBoards(boards, mode, noAttr, fullOnly){
+    _bsCache={boards:boards, mode:mode, noAttr:noAttr};
+    if(fullOnly===undefined) fullOnly=!!(document.getElementById('bsFullOnly')||{}).checked;
+    var allFull=0, i; for(i=0;i<boards.length;i++) if(boards[i].hit>=boards[i].total) allFull++;
     var sum=document.getElementById('bsSummary');
-    if(sum) sum.textContent='扫描 '+boards.length+' 个板块，'+full+' 个 4/4 全命中（口径 '
+    if(sum) sum.textContent='扫描 '+boards.length+' 个板块，'+allFull+' 个 4/4 全命中（口径 '
       +({'strict':'严格','normal':'标准','loose':'宽松'}[mode]||mode)+(noAttr?' · 已排除属性类板块':' · 含全部板块')
-      +'）'+( _bsLastDate?(' · K线最后交易日 '+_bsLastDate+'（非最近交易日请勿用于实盘）'):'' );
-    var show=boards.slice(0,12);
-    var h=show.map(cardHTML).join('');
-    if(!h) h='<div class="bs-note">未获得有效板块（成分股 K 线不足或网络异常）。可关闭「排除属性类板块」或换宽松档重试。</div>';
-    h+='<div class="bs-note">仅显示命中数前 '+show.length+' 个板块，每板块显示命中数前 8 只成分股。'
+      +'）'+( _bsLastDate?(' · K线最后交易日 '+_bsLastDate+'（非最近交易日请勿用于实盘）'):'' )
+      +(fullOnly?' · 仅显示 4/4 全命中板块':' · 显示全部板块');
+    var list = fullOnly ? boards.filter(function(b){ return b.hit>=b.total; }) : boards;
+    var show=list.slice(0,12);
+    var h=show.map(function(b,ix){ return cardHTML(b, ix, fullOnly); }).join('');
+    if(!h) h='<div class="bs-note">'+(fullOnly
+      ? '本次扫描无 4/4 全命中板块（'+allFull+'/'+boards.length+'）。当前行情四条件同时满足的板块为空；可取消勾选「只看4/4全命中」查看部分命中板块，或换「宽松档」重试。'
+      : '未获得有效板块（成分股 K 线不足或网络异常）。可关闭「排除属性类板块」或换宽松档重试。')+'</div>';
+    h+='<div class="bs-note">'+ (fullOnly?'已过滤：仅显示 4/4 全命中板块，板块内也只列全命中个股。':'仅显示命中数前 '+show.length+' 个板块，每板块显示命中数前 8 只成分股。')
       +'⚠️ 板块内成分股高度相关，同时持有多只等于伪分散（§11.3 同板块≤2 只）；结果仅为候选，不是交易信号。</div>';
     var box=document.getElementById('bsCards'); if(box) box.innerHTML=h;
     Array.prototype.forEach.call(document.querySelectorAll('.bs-toggle'),function(t){
@@ -3888,7 +3900,7 @@ function registerSW(){
       });
       boards.sort(function(a,b){ return (b.hit-a.hit)||(b.pct-a.pct); });
       setProg(100,'完成');
-      renderBoards(boards, mode, noAttr);
+      renderBoards(boards, mode, noAttr, !!(document.getElementById('bsFullOnly')||{}).checked);
     }).catch(function(e){
       if(e&&e.message==='STOP'){ setProg(0,'已停止'); }
       else { setProg(0,'失败'); var s=document.getElementById('bsSummary'); if(s) s.textContent='扫描失败：'+((e&&e.message)||e); }
@@ -3899,6 +3911,10 @@ function registerSW(){
     var r=document.getElementById('bsRun'), s=document.getElementById('bsStop');
     if(r) r.onclick=bsRun;
     if(s) s.onclick=function(){ _bsStop=true; setProg(0,'正在停止…'); };
+    var fo=document.getElementById('bsFullOnly');
+    if(fo) fo.onchange=function(){
+      if(_bsCache) renderBoards(_bsCache.boards, _bsCache.mode, _bsCache.noAttr, !!fo.checked);
+    };
     renderGate();
   }
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',bind); else bind();

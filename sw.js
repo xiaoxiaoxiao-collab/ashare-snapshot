@@ -3,7 +3,7 @@
    确保部署新版本后浏览器永远拉取服务端最新文件，不再被旧缓存卡住。
    缓存名升级到 v6：删除「周线」模块；导航请求（含站点根路径）一律网络优先且不缓存，
    彻底修复「从 /ashare-snapshot/ 根路径进入时命中旧缓存」的版本僵死问题。 */
-const CACHE = 'ashare-v9';
+const CACHE = 'ashare-v10';
 const CORE = ['./manifest.json', './icon.svg', './icon-192.png', './icon-512.png'];
 // 这些文件「网络优先」：先请求服务端，失败才退回缓存，避免版本僵死
 const NETWORK_FIRST = ['/index.html', '/sw.js', '/stocks.js'];

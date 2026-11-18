@@ -487,7 +487,7 @@
   <script src="stocks.js"></script>
   <div class="topfix">
     <div class="top">
-      <h1>📊 五维共振 <span class="appver" title="前端版本号：与线上一致才是最新版">v6·1118</span> <span class="livebadge" id="liveBadge" style="display:none"></span></h1>
+      <h1>📊 五维共振 <span class="appver" title="前端版本号：与线上一致才是最新版">v6·1119</span> <span class="livebadge" id="liveBadge" style="display:none"></span></h1>
       <div style="text-align:right">
         <div class="upd" id="upd">加载中…</div>
         <div style="margin-top:4px">
@@ -548,9 +548,8 @@
     <div class="bs-ctrl">
       <label>口径
         <select id="bsMode">
-          <option value="normal" selected>标准档（默认）</option>
-          <option value="strict">严格档（原教旨·常年空仓）</option>
-          <option value="loose">宽松档</option>
+          <option value="strict" selected>严格档（原教旨·常年空仓）</option>
+          <option value="normal">标准档</option>
         </select>
       </label>
       <label><input type="checkbox" id="bsAttr" checked> 排除属性类板块</label>
@@ -571,7 +570,7 @@
       <b>⑧ 持有与退出（已按手册修正）：</b>短线档 T+1 隔天出 / 波段档以<b>收盘价</b>定型是否破 MA5；回踩 MA10/MA20 仅在板块仍在候选且闸门开启时、须缩量+反转确认；<b>破 MA20 次日收盘未站回即清仓</b>，跌停封死时以次日竞价离场兜底。补：单票≤30%、单笔风险≤2%、总回撤≥8% 强制休整、往返成本≈0.16%、盈亏比&lt;1.5 不动手。
     </div>
     <div class="bs-note">
-      <b>局限（必读）：</b>板块口径为新浪概念列表成分的<b>当前名单等权合成</b>，存在成分变动的历史偏差；「恰好/小幅/红柱」等定性词的三档量化解释是工具补充，<b>尚未经胜率与期望值回测</b>；严格档实跑 24 板块 0 个 4/4 全命中，故默认标准档；结果仅为<b>候选清单，不是交易信号</b>。K 线最后交易日会随结果显示，若非最近交易日请勿用于实盘。参数详见手册第十二章。
+      <b>局限（必读）：</b>板块口径为新浪概念列表成分的<b>当前名单等权合成</b>，存在成分变动的历史偏差；「恰好/小幅/红柱」等定性词的三档量化解释是工具补充，<b>尚未经胜率与期望值回测</b>；严格档实跑 24 板块 0 个 4/4 全命中（原教旨、常年空仓），故默认严格档；如需观察部分命中可切标准档；结果仅为<b>候选清单，不是交易信号</b>。K 线最后交易日会随结果显示，若非最近交易日请勿用于实盘。参数详见手册第十二章。
     </div>
   </div>
 
@@ -3630,8 +3629,7 @@ function registerSW(){
 
   var BS_MODE_CFG = {
     strict: {cross_win:1, gold_win:3, vol_win:5, small_dn:2.5, small_up:3.0, vol_shrink:0.85, vol_expand:1.15, cross_hold:false, gold_hold:false},
-    normal: {cross_win:5, gold_win:5, vol_win:8, small_dn:3.0, small_up:3.5, vol_shrink:0.90, vol_expand:1.10, cross_hold:true,  gold_hold:true},
-    loose:  {cross_win:8, gold_win:8, vol_win:12,small_dn:3.5, small_up:4.0, vol_shrink:0.95, vol_expand:1.05, cross_hold:true,  gold_hold:true}
+    normal: {cross_win:5, gold_win:5, vol_win:8, small_dn:3.0, small_up:3.5, vol_shrink:0.90, vol_expand:1.10, cross_hold:true,  gold_hold:true}
   };
   /* 属性类板块关键词：新浪列表混入的持仓/风格/地域类，非题材主线；属工具补充规则 */
   var BS_ATTR_WORDS = ['重仓','含H股','融资融券','超大盘','央企','国企','业绩','解禁','指数','成份','成分','AH股','破净','预增','预降','次新','送转','举牌','增持','减持','回购','股权激励','MSCI','富时','沪深300','上证','深证','中证','QFII','社保','基金','保险','券商','信托','银行','参股','低价','高价','ST股','B股','GDR','转融','标普','茅指数','宁组合'];
@@ -3799,15 +3797,15 @@ function registerSW(){
     var allFull=0, i; for(i=0;i<boards.length;i++) if(boards[i].hit>=boards[i].total) allFull++;
     var sum=document.getElementById('bsSummary');
     if(sum) sum.textContent='扫描 '+boards.length+' 个板块，'+allFull+' 个 4/4 全命中（口径 '
-      +({'strict':'严格','normal':'标准','loose':'宽松'}[mode]||mode)+(noAttr?' · 已排除属性类板块':' · 含全部板块')
+      +({'strict':'严格','normal':'标准'}[mode]||mode)+(noAttr?' · 已排除属性类板块':' · 含全部板块')
       +'）'+( _bsLastDate?(' · K线最后交易日 '+_bsLastDate+'（非最近交易日请勿用于实盘）'):'' )
       +(fullOnly?' · 仅显示 4/4 全命中板块':' · 显示全部板块');
     var list = fullOnly ? boards.filter(function(b){ return b.hit>=b.total; }) : boards;
     var show=list.slice(0,12);
     var h=show.map(function(b,ix){ return cardHTML(b, ix, fullOnly); }).join('');
     if(!h) h='<div class="bs-note">'+(fullOnly
-      ? '本次扫描无 4/4 全命中板块（'+allFull+'/'+boards.length+'）。当前行情四条件同时满足的板块为空；可取消勾选「只看4/4全命中」查看部分命中板块，或换「宽松档」重试。'
-      : '未获得有效板块（成分股 K 线不足或网络异常）。可关闭「排除属性类板块」或换宽松档重试。')+'</div>';
+      ? '本次扫描无 4/4 全命中板块（'+allFull+'/'+boards.length+'）。当前行情四条件同时满足的板块为空；严格档本就常年空仓，可取消勾选「只看4/4全命中」查看部分命中板块，或换「标准档」重试。'
+      : '未获得有效板块（成分股 K 线不足或网络异常）。可关闭「排除属性类板块」或换「标准档」重试。')+'</div>';
     h+='<div class="bs-note">'+ (fullOnly?'已过滤：仅显示 4/4 全命中板块，板块内也只列全命中个股。':'仅显示命中数前 '+show.length+' 个板块，每板块显示命中数前 8 只成分股。')
       +'⚠️ 板块内成分股高度相关，同时持有多只等于伪分散（§11.3 同板块≤2 只）；结果仅为候选，不是交易信号。</div>';
     var box=document.getElementById('bsCards'); if(box) box.innerHTML=h;
@@ -3823,8 +3821,8 @@ function registerSW(){
   function bsRun(){
     if(_bsRunning) return;
     _bsRunning=true; _bsStop=false; _bsKL={}; _bsLastDate='';
-    var mode=(document.getElementById('bsMode')||{}).value||'normal';
-    var cfg=BS_MODE_CFG[mode]||BS_MODE_CFG.normal;
+    var mode=(document.getElementById('bsMode')||{}).value||'strict';
+    var cfg=BS_MODE_CFG[mode]||BS_MODE_CFG.strict;
     var noAttr=!!(document.getElementById('bsAttr')||{}).checked;
     renderGate(); setUI(true);
     var cards=document.getElementById('bsCards'); if(cards) cards.innerHTML='';
